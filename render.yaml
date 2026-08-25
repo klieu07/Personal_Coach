@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+previews:
+  generation: off
+
+services:
+  - type: web
+    name: coachline-api
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: COACHLINE_DATABASE_URL
+        fromDatabase:
+          name: coachline-postgres
+          property: connectionString
+      - key: COACHLINE_ADMIN_TOKEN
+        generateValue: true
+      - key: COACHLINE_LOG_LEVEL
+        value: INFO
+      - key: OPENAI_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+
+  - type: cron
+    name: coachline-reminders
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    schedule: "*/5 * * * *"
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.commands.run_reminders
+    envVars:
+      - key: COACHLINE_API_HOSTPORT
+        fromService:
+          type: web
+          name: coachline-api
+          property: hostport
+      - key: COACHLINE_ADMIN_TOKEN
+        fromService:
+          type: web
+          name: coachline-api
+          envVarKey: COACHLINE_ADMIN_TOKEN
+
+databases:
+  - name: coachline-postgres
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "18"
+    databaseName: coachline
+    user: coachline
+    ipAllowList: []
+    storageAutoscalingEnabled: true

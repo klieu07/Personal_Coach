@@ -1,14 +1,20 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 9
-makes the application deployable with PostgreSQL, production health checks,
-structured request logs, and an explicit operations runbook. SQLite remains
-the zero-service local development default.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 10
+defines its first reproducible cloud deployment: a Render web service, managed
+PostgreSQL, private reminder scheduler, CI gate, and read-only staging smoke
+test. SQLite remains the zero-service local development default.
 
-## Current scope: Phase 9
+## Current scope: Phase 10
 
 Coachline can now:
 
+- provision its Render topology from one reviewed `render.yaml` Blueprint;
+- keep PostgreSQL and scheduler traffic on Render's private network;
+- block public PostgreSQL connections at the platform boundary;
+- wait for GitHub Actions tests before automatic application deployment;
+- run a strict, read-only deployment smoke test against production health
+  contracts;
 - select SQLite or PostgreSQL from configuration without changing services;
 - apply backend-specific migrations safely during concurrent startup;
 - expose separate liveness and database-aware readiness checks;
@@ -223,6 +229,10 @@ When `COACHLINE_DATABASE_URL` is set it takes precedence over the local path.
 See [OPERATIONS.md](OPERATIONS.md) for deployment, scheduler, secret, backup,
 restore, and rollback procedures.
 
+The provider-specific activation and verification steps are in
+[RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md). Deploying the Blueprint creates
+billed Render resources and therefore remains an explicit account-owner action.
+
 ## Configure and run reminders
 
 Reminder times are local to the profile. Quiet hours may cross midnight. Equal
@@ -327,6 +337,8 @@ Database and operations tests cover SQLite selection, PostgreSQL connection
 translation and native migrations, migration locking and idempotency,
 liveness, readiness failure sanitization, request IDs, and log privacy. No real
 SMS, OpenAI request, or external database is used by the automated suite.
+Deployment tests cover the Render topology, private authenticated scheduler
+invocation, health-contract smoke checks, and unsafe URL rejection.
 
 ## Run with Docker
 
@@ -341,7 +353,8 @@ managed PostgreSQL and inject secrets through the hosting platform.
 
 ## Next architectural step
 
-Phase 10 should deploy this Phase 9 artifact to a user-selected cloud platform,
-provision managed PostgreSQL and scheduler services, and run a staged
-end-to-end verification. That step requires an explicit platform choice and
-account credentials; this repository deliberately contains neither.
+After the account owner deploys the Phase 10 Blueprint and the read-only staging
+checks pass, the next section should add authenticated user onboarding. That
+will replace direct administrative profile setup with a safe first-run flow
+for creating the owner's profile, linking the verified Twilio contact, and
+setting initial training, nutrition, and reminder preferences.

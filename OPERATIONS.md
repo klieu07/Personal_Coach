@@ -1,7 +1,8 @@
 # Coachline operations
 
-This runbook describes the production boundary introduced in Phase 9. It does
-not create a cloud account or deploy into one automatically.
+This runbook describes the production boundary introduced in Phase 9 and the
+Render deployment selected in Phase 10. It does not create a cloud account or
+deploy billed resources automatically.
 
 ## Runtime topology
 
@@ -31,6 +32,10 @@ Non-secret settings include `PORT`, `COACHLINE_LOG_LEVEL`, `OPENAI_MODEL`, and
 SQLite development.
 
 ## Deployment sequence
+
+The concrete Render procedure is in `RENDER_DEPLOYMENT.md`; `render.yaml` is the
+infrastructure source of truth. The account owner must review current pricing
+and secrets before deploying it.
 
 1. Provision a managed PostgreSQL database with encrypted connections,
    automated backups, and restricted network access.

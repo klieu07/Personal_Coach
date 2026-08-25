@@ -4,35 +4,35 @@
 
 `/Users/klieu07/Personal Coach`
 
-## Completed through Phase 9
+## Completed through Phase 10
 
-Phases 0–8 provide the FastAPI foundation, structured lifting and running,
-provider-neutral Twilio messaging, validated OpenAI interpretation with
-confirmation boundaries, proactive reminders, and the deterministic nutrition
-ledger with clearly labeled AI estimates.
+Phases 0–9 provide the FastAPI foundation, structured training, factual
+nutrition, provider-neutral Twilio messaging, validated OpenAI interpretation,
+confirmed mutations, proactive reminders, SQLite/PostgreSQL portability, and
+production operations boundaries.
 
-Phase 9 adds the production operations foundation:
+Phase 10 selects Render and adds a reproducible deployment package:
 
-- one portable database interface for SQLite and PostgreSQL;
-- SQLite as the no-service local development default;
-- PostgreSQL selected through `COACHLINE_DATABASE_URL`;
-- native PostgreSQL migrations for all six existing schema versions;
-- transaction-scoped PostgreSQL advisory locking for concurrent migrations;
-- portable repositories using `RETURNING id` and backend-neutral conflicts;
-- serialized PostgreSQL reminder claiming across application instances;
-- backward-compatible `/health`, process `/health/live`, and database-aware
-  `/health/ready` routes;
-- sanitized readiness failures that do not expose database connection data;
-- validated request IDs and privacy-safe structured JSON access logs;
-- `PORT`-aware application startup through `python -m app`;
-- a non-root production container with a readiness health check;
-- environment templates for local SQLite and production PostgreSQL; and
-- deployment, secrets, scheduler, backup, restore, and rollback guidance in
-  `OPERATIONS.md`.
+- `render.yaml` defines a paid starter Docker web service, a private PostgreSQL
+  18 database, and a five-minute reminder cron job in Oregon;
+- the database's public IP allow list is empty;
+- the API receives Render's internal database connection string;
+- the cron receives the API's private address and generated admin token through
+  service references;
+- Twilio and OpenAI credentials use `sync: false` and never enter Git;
+- GitHub Actions runs tests and compilation with Python 3.12;
+- both Render services wait for CI checks before deploying;
+- `python -m app.commands.run_reminders` performs one authenticated internal
+  scheduler invocation and exits;
+- `python -m app.commands.smoke_test <https-url>` validates public health and
+  PostgreSQL readiness without reading or mutating user data; and
+- `RENDER_DEPLOYMENT.md` documents account activation, cost review, Twilio URL
+  setup, staged testing, rollback, and cost shutdown.
 
-No real SMS, OpenAI request, or external PostgreSQL connection is made by the
-automated test suite. No personal phone number or credential is stored in the
-repository.
+No Render resource has been created because there is no connected Render
+account in this workspace. Deploying the Blueprint is an explicit billed action
+for the account owner. No SMS, OpenAI request, or external database request is
+made by the automated suite, and no personal phone number is tracked.
 
 ## Verification
 
@@ -43,42 +43,41 @@ Run from the repository root:
 .venv/bin/python -m compileall -q app tests
 ```
 
-The Phase 9 suite has 38 tests. The only expected warning is a third-party
+The Phase 10 suite has 49 tests. The only expected warning is a third-party
 Starlette test-client deprecation warning on Python 3.14.
 
-PostgreSQL behavior is covered at the adapter and migration boundary with a
-fake Psycopg connection. The first cloud deployment must also run a staging
-smoke test against the selected managed PostgreSQL service.
+The Blueprint parses as YAML locally. The official Render CLI install was
+attempted for semantic validation, but Homebrew's update stalled and was
+stopped without installing the CLI. Render performs final Blueprint validation
+and shows its resource plan before the account owner confirms deployment.
 
-## Production configuration
+## Activation boundary
 
-- `COACHLINE_DATABASE_URL` for managed PostgreSQL.
-- `COACHLINE_ADMIN_TOKEN` for scheduler and outbound-admin operations.
-- Twilio credentials and the exact webhook URL.
-- `OPENAI_API_KEY` when AI interpretation is enabled.
-- `PORT` and `COACHLINE_LOG_LEVEL` as non-secret runtime settings.
+Follow `RENDER_DEPLOYMENT.md` after committing and pushing:
 
-Production secrets belong in the hosting platform's secret manager. Local
-`.env`, credentials, database dumps, and personal phone numbers must remain
-untracked.
+1. Connect `klieu07/Personal_Coach` in **New > Blueprint** on Render.
+2. Review current pricing for all three resources.
+3. Supply Twilio values and the optional OpenAI key.
+4. Deploy and wait for PostgreSQL readiness.
+5. Run the read-only smoke test.
+6. Set the exact Twilio webhook URL, then test `TODAY` before mutations.
 
 ## Important rules
 
+- Never commit Render, PostgreSQL, Twilio, OpenAI, or admin secrets.
+- Do not put personal phone numbers in Blueprint environment variables.
+- Do not perform a live SMS check before readiness and webhook setup pass.
 - AI output remains untrusted until schema, ownership, and state validation.
-- AI proposes mutations but cannot execute them without explicit confirmation.
-- Deterministic commands must work without OpenAI.
+- State-changing AI intents require explicit confirmation.
 - Reminder delivery stays opt-in, idempotent, and scheduler-authenticated.
-- Public nutrition writes remain `user_supplied`; estimates remain visible.
-- Migration versions are forward-only and must never be edited after release.
+- Migration versions are forward-only and must not be edited after release.
 - SQLite and PostgreSQL must preserve the same domain behavior.
-- Readiness and logs must never expose credentials, bodies, queries, or contact
-  addresses.
 - Files under `sources/` are synced read-only references and must not be
   changed, moved, or deleted.
 
-## Recommended next phase
+## Recommended next section
 
-Phase 10 should select a cloud provider, deploy the Phase 9 artifact, provision
-managed PostgreSQL and a scheduled reminder trigger, install secrets, and run
-staging end-to-end checks. It requires explicit platform selection and account
-authorization; those are intentionally not inferred from this phase.
+After the Blueprint is deployed and its staged checks pass, add authenticated
+owner onboarding. It should create the first profile, link a verified Twilio
+contact, and collect initial training, nutrition, and reminder preferences
+without exposing the current administrative API publicly as an onboarding UI.

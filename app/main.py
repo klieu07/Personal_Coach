@@ -142,7 +142,7 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.9.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.10.0", lifespan=lifespan)
     application.state.database = database
     install_request_observability(application)
 
