@@ -1,33 +1,29 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 5
-adds typed AI interpretation to the secure SMS and training foundations built
-in Phases 0–4.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 6
+adds proactive workout reminders to the training, secure SMS, and validated AI
+foundations built in Phases 0–5.
 
-## Current scope: Phase 5
+## Current scope: Phase 6
 
 Coachline can now:
 
-- interpret free-form SMS through an AI-provider contract;
-- use OpenAI's Responses API with a strict JSON schema;
-- recognize `show_today`, `skip_session`, `record_result`, `clarify`, and
-  conversational `reply` intents;
-- execute read-only intents immediately;
-- require an explicit `YES` before any AI-proposed training mutation;
-- cancel a pending action with `NO`;
-- expire pending actions after 15 minutes;
-- verify that a referenced session belongs to the linked profile;
-- preserve deterministic commands when OpenAI is unavailable;
-- audit interpretations locally without storing an API key; and
-- reject malformed or out-of-scope model output before it reaches domain code.
+- opt profiles into proactive reminders with a chosen local time;
+- schedule from the profile's validated IANA timezone;
+- defer reminder delivery until configured quiet hours end;
+- create one durable reminder job per planned session;
+- cancel pending jobs when sessions are completed, skipped, or reminders are
+  disabled;
+- claim due jobs transactionally so overlapping scheduler runs do not deliver
+  the same completed job twice;
+- retry temporary delivery failures with bounded exponential backoff;
+- recover jobs abandoned by an interrupted scheduler run;
+- deliver through the existing provider-neutral messaging service; and
+- run safely from cloud cron through an admin-token-protected endpoint.
 
-Phase 5 uses `gpt-5.6-luna` with low reasoning by default because SMS intent
-classification is latency-sensitive and high volume. Both values are
-configuration settings rather than hard application dependencies.
-
-The implementation follows the official OpenAI documentation for the
-[Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create)
-and [current model guidance](https://developers.openai.com/api/docs/guides/latest-model).
+Reminder settings default to disabled. Saving settings or creating a workout
+never sends a message; the authenticated scheduler run is the only proactive
+delivery trigger.
 
 ## Safety and approval boundary
 
@@ -71,22 +67,37 @@ message SID returns the stored response and does not execute twice.
 
 No OpenAI request or real SMS is made by the automated test suite.
 
+## Proactive reminder workflow
+
+Each enabled profile supplies a reminder time and quiet-hour window. A
+scheduler calls `POST /reminders/run-due` periodically. Coachline synchronizes
+planned sessions into SQLite, converts each local reminder time to UTC, claims
+due jobs, and sends them through the same messaging boundary used for manual
+outbound messages.
+
+Jobs are unique by training session. Successful, cancelled, and permanently
+failed jobs are terminal. Temporary failures retry after 5 and 10 minutes, up
+to three total attempts. A job left in `processing` for 15 minutes is recovered
+on the next run.
+
 ## Final architecture direction
 
 ```text
+Cloud scheduler -------- proactive reminder jobs
+        |                           |
+        +---- Coachline services ---+
+                     |
 Twilio / future BlueBubbles
-            |
+                     |
 provider-neutral messaging and idempotency
-            |
-deterministic router ---- AI interpreter
-            |                  |
-            +---- typed intent-+
-                      |
-        validation and confirmation
-                      |
-             Coachline services
-                      |
-          SQLite / future PostgreSQL
+                     |
+deterministic router -------- AI interpreter
+                     |              |
+                     + typed intent +
+                             |
+                 validation and confirmation
+                             |
+                  SQLite / future PostgreSQL
 ```
 
 AI interpretation is replaceable. Training state, ownership, approval, and
@@ -109,7 +120,8 @@ OPENAI_REASONING_EFFORT=low
 ```
 
 Twilio still requires its Phase 4 values, including the exact public webhook
-URL. Load the environment before running locally:
+URL. `COACHLINE_ADMIN_TOKEN` protects both manual outbound delivery and the
+Phase 6 scheduler endpoint. Load the environment before running locally:
 
 ```bash
 set -a
@@ -119,6 +131,34 @@ set +a
 
 Never commit `.env` or insert real API keys, auth tokens, or personal phone
 numbers into tests and documentation.
+
+## Configure and run reminders
+
+Reminder times are local to the profile. Quiet hours may cross midnight. Equal
+quiet-hour start and end values disable the quiet window.
+
+```http
+PUT /profiles/1/reminder-settings
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "reminder_time": "08:00",
+  "quiet_hours_start": "21:00",
+  "quiet_hours_end": "07:00"
+}
+```
+
+Configure a trusted cloud scheduler to call the following route at least every
+five minutes:
+
+```http
+POST /reminders/run-due
+X-Coachline-Admin-Token: <COACHLINE_ADMIN_TOKEN>
+```
+
+The endpoint is safe to call repeatedly. It returns counts for synchronized,
+cancelled, recovered, delivered, retrying, and permanently failed jobs.
 
 ## Supported messaging behavior
 
@@ -142,9 +182,10 @@ the user.
 
 ## API
 
-The Phase 0–4 health, training, contact, outbound-message, and signed Twilio
-webhook endpoints remain available. AI interpretation is internal to the
-messaging workflow, so no endpoint can bypass confirmation by submitting a
+The earlier health, training, contact, outbound-message, signed Twilio webhook,
+and validated AI workflows remain available. Phase 6 adds profile reminder
+settings and the authenticated scheduler route. AI interpretation is internal
+to messaging, so no endpoint can bypass confirmation by submitting a
 model-generated action directly.
 
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
@@ -172,7 +213,9 @@ pytest
 Tests use fake OpenAI and Twilio clients. They cover strict request shape,
 malformed model output, deterministic fallback, confirmation and cancellation,
 duplicate webhook delivery, local audit state, completed-result recording, and
-cross-profile isolation.
+cross-profile isolation. Reminder tests additionally cover opt-in defaults,
+quiet-hour deferral, timezone conversion, idempotent scheduler runs, state
+cancellation, authentication, and delivery retry backoff.
 
 ## Run with Docker
 
@@ -185,6 +228,7 @@ For durable Docker data, mount `/app/data` as a volume.
 
 ## Next architectural step
 
-Phase 6 should add proactive reminder scheduling and delivery. It should query
-planned session state, create idempotent reminder jobs, respect the profile's
-timezone and quiet hours, and use the existing provider-neutral sender.
+Phase 7 can add a structured nutrition ledger, daily targets, and meal entry.
+User-supplied nutrition values should remain authoritative, with any future AI
+estimate clearly labeled and replaceable rather than silently overwriting
+factual entries.

@@ -2,9 +2,9 @@ import os
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Callable, Literal
 
 from fastapi import (
     Depends,
@@ -44,6 +44,13 @@ from app.messaging.twilio import (
     TwilioAdapter,
 )
 from app.repository import ConflictError, NotFoundError, SQLiteCoachlineRepository
+from app.reminders.models import (
+    ReminderRunResult,
+    ReminderSettings,
+    ReminderSettingsUpdate,
+)
+from app.reminders.repository import SQLiteReminderRepository
+from app.reminders.service import ReminderService
 from app.schemas import (
     Prescription,
     Profile,
@@ -76,6 +83,7 @@ def create_app(
     openai_settings: OpenAISettings | None = None,
     ai_interpreter: AIInterpreter | None = None,
     admin_token: str | None = None,
+    now_provider: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     """Create a Coachline application with an isolated persistence layer."""
 
@@ -100,13 +108,19 @@ def create_app(
         interpreter=interpreter,
         ai_repository=SQLiteAIRepository(database),
     )
+    reminders = ReminderService(
+        service,
+        messaging,
+        SQLiteReminderRepository(database),
+    )
+    clock = now_provider or (lambda: datetime.now(timezone.utc))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.5.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.6.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service
@@ -117,6 +131,22 @@ def create_app(
         return messaging
 
     Messaging = Annotated[MessagingService, Depends(get_messaging)]
+
+    def get_reminders() -> ReminderService:
+        return reminders
+
+    Reminders = Annotated[ReminderService, Depends(get_reminders)]
+
+    def require_admin_token(supplied_admin_token: str | None) -> None:
+        if not outbound_admin_token:
+            raise HTTPException(
+                status_code=503,
+                detail="COACHLINE_ADMIN_TOKEN is required for this operation",
+            )
+        if supplied_admin_token is None or not secrets.compare_digest(
+            supplied_admin_token, outbound_admin_token
+        ):
+            raise HTTPException(status_code=401, detail="Invalid admin token")
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -319,15 +349,7 @@ def create_app(
             str | None, Header(alias="X-Coachline-Admin-Token")
         ] = None,
     ) -> SentMessage:
-        if not outbound_admin_token:
-            raise HTTPException(
-                status_code=503,
-                detail="COACHLINE_ADMIN_TOKEN is required for outbound SMS",
-            )
-        if supplied_admin_token is None or not secrets.compare_digest(
-            supplied_admin_token, outbound_admin_token
-        ):
-            raise HTTPException(status_code=401, detail="Invalid admin token")
+        require_admin_token(supplied_admin_token)
         try:
             service.get_profile(profile_id)
             return messages.send_to_profile(profile_id, payload.body)
@@ -337,6 +359,42 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except MessageDeliveryError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/reminder-settings",
+        response_model=ReminderSettings,
+    )
+    def get_reminder_settings(
+        profile_id: int, reminder_service: Reminders
+    ) -> ReminderSettings:
+        try:
+            return reminder_service.get_settings(profile_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.put(
+        "/profiles/{profile_id}/reminder-settings",
+        response_model=ReminderSettings,
+    )
+    def save_reminder_settings(
+        profile_id: int,
+        payload: ReminderSettingsUpdate,
+        reminder_service: Reminders,
+    ) -> ReminderSettings:
+        try:
+            return reminder_service.save_settings(profile_id, payload)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.post("/reminders/run-due", response_model=ReminderRunResult)
+    def run_due_reminders(
+        reminder_service: Reminders,
+        supplied_admin_token: Annotated[
+            str | None, Header(alias="X-Coachline-Admin-Token")
+        ] = None,
+    ) -> ReminderRunResult:
+        require_admin_token(supplied_admin_token)
+        return reminder_service.run_due(clock())
 
     @application.post("/webhooks/twilio/sms")
     async def receive_twilio_sms(request: Request) -> Response:
