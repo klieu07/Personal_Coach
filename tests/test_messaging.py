@@ -45,7 +45,14 @@ def configured_client(
         twilio_adapter=adapter,
         admin_token="test-admin-token",
     )
-    return TestClient(app), adapter, fake_client
+    return (
+        TestClient(
+            app,
+            headers={"Authorization": "Bearer test-admin-token"},
+        ),
+        adapter,
+        fake_client,
+    )
 
 
 def create_linked_profile(client: TestClient) -> int:
@@ -168,11 +175,12 @@ def test_outbound_message_uses_provider_boundary(tmp_path: Path) -> None:
         unauthorized = client.post(
             f"/profiles/{profile_id}/messages",
             json={"body": "Do not send this."},
+            headers={"Authorization": ""},
         )
         sent = client.post(
             f"/profiles/{profile_id}/messages",
             json={"body": "Tomorrow is a rest day."},
-            headers={"X-Coachline-Admin-Token": "test-admin-token"},
+            headers={"Authorization": "Bearer test-admin-token"},
         )
         duplicate_contact = client.post(
             f"/profiles/{profile_id}/messaging-contacts",
@@ -196,8 +204,12 @@ def test_twilio_routes_are_unavailable_without_configuration(tmp_path: Path) -> 
     app = create_app(
         tmp_path / "coachline.sqlite3",
         twilio_settings=TwilioSettings(),
+        admin_token="test-admin-token",
     )
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer test-admin-token"},
+    ) as client:
         profile_id = create_linked_profile(client)
         webhook = client.post("/webhooks/twilio/sms")
         outbound = client.post(

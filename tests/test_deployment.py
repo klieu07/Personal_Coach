@@ -63,7 +63,7 @@ def test_render_scheduler_uses_private_authenticated_post() -> None:
         "method": "POST",
         "headers": {
             "Accept": "application/json",
-            "X-coachline-admin-token": "private-admin-token",
+            "Authorization": "Bearer private-admin-token",
             "X-request-id": "render-reminder-cron",
         },
         "timeout": 15,
@@ -136,9 +136,15 @@ def test_render_blueprint_has_private_database_and_no_secrets() -> None:
     assert "healthCheckPath: /health/ready" in blueprint
     assert blueprint.count("autoDeployTrigger: checksPass") == 1
     assert blueprint.count("plan: free") == 2
+    assert blueprint.count("\n  - type:") == 1
+    assert blueprint.count("\n  - name:") == 1
+    assert "type: web" in blueprint
+    assert "type: worker" not in blueprint
     assert "coachline-reminders" not in blueprint
     assert "type: cron" not in blueprint
     assert "maxShutdownDelaySeconds" not in blueprint
+    assert "disk:" not in blueprint
+    assert "disks:" not in blueprint
     assert "property: connectionString" in blueprint
     assert "ipAllowList: []" in blueprint
     assert "generateValue: true" in blueprint

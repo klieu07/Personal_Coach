@@ -59,7 +59,13 @@ def reminder_client(
         admin_token="test-admin-token",
         now_provider=clock,
     )
-    return TestClient(app), fake_twilio
+    return (
+        TestClient(
+            app,
+            headers={"Authorization": "Bearer test-admin-token"},
+        ),
+        fake_twilio,
+    )
 
 
 def create_plan(
@@ -119,7 +125,7 @@ def enable_reminders(
 def run_due(client: TestClient) -> object:
     return client.post(
         "/reminders/run-due",
-        headers={"X-Coachline-Admin-Token": "test-admin-token"},
+        headers={"Authorization": "Bearer test-admin-token"},
     )
 
 
@@ -141,7 +147,9 @@ def test_reminders_are_opt_in_and_settings_are_validated(tmp_path: Path) -> None
                 "quiet_hours_end": "07:00",
             },
         )
-        unauthorized = client.post("/reminders/run-due")
+        unauthorized = client.post(
+            "/reminders/run-due", headers={"Authorization": ""}
+        )
 
     assert defaults.json() == {
         "enabled": False,

@@ -38,6 +38,8 @@ def install_request_observability(application: FastAPI) -> None:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["X-Request-ID"] = request_id
+            if getattr(request.state, "private_operation", False):
+                response.headers["Cache-Control"] = "no-store"
             return response
         finally:
             duration_ms = round((time.perf_counter() - started) * 1000, 2)

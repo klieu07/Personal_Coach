@@ -6,7 +6,10 @@ from app.main import create_app
 
 
 def make_client(database_path: Path) -> TestClient:
-    return TestClient(create_app(database_path))
+    return TestClient(
+        create_app(database_path, admin_token="test-owner-token"),
+        headers={"Authorization": "Bearer test-owner-token"},
+    )
 
 
 def create_training_plan(client: TestClient) -> tuple[int, int, int]:

@@ -7,15 +7,17 @@ from pathlib import Path
 from typing import Annotated, Callable, Literal
 
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
-    Header,
     HTTPException,
     Query,
     Request,
     Response,
+    Security,
     status,
 )
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.ai.config import OpenAISettings
@@ -111,7 +113,11 @@ def create_app(
     database = Database(database_source)
     service = CoachlineService(SQLCoachlineRepository(database))
     settings = twilio_settings or TwilioSettings.from_env()
-    outbound_admin_token = admin_token or os.getenv("COACHLINE_ADMIN_TOKEN")
+    owner_token = (
+        admin_token
+        if admin_token is not None
+        else os.getenv("COACHLINE_ADMIN_TOKEN")
+    )
     adapter = twilio_adapter
     if adapter is None and settings.can_validate_webhooks:
         adapter = TwilioAdapter(settings)
@@ -143,10 +149,44 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.10.1", lifespan=lifespan)
+    bearer_scheme = HTTPBearer(
+        auto_error=False,
+        scheme_name="OwnerBearer",
+        description="Owner credential from COACHLINE_ADMIN_TOKEN",
+    )
+
+    def require_owner(
+        request: Request,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Security(bearer_scheme),
+        ],
+    ) -> None:
+        request.state.private_operation = True
+        if not owner_token:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Owner authentication is not configured",
+            )
+        if credentials is None or not secrets.compare_digest(
+            credentials.credentials, owner_token
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    application = FastAPI(
+        title="Coachline",
+        version="0.11.0",
+        lifespan=lifespan,
+        redoc_url=None,
+    )
     application.state.database = database
     install_request_observability(application)
     application.include_router(public_pages_router)
+    private_router = APIRouter(dependencies=[Security(require_owner)])
 
     def get_service() -> CoachlineService:
         return service
@@ -167,17 +207,6 @@ def create_app(
         return nutrition
 
     Nutrition = Annotated[NutritionService, Depends(get_nutrition)]
-
-    def require_admin_token(supplied_admin_token: str | None) -> None:
-        if not outbound_admin_token:
-            raise HTTPException(
-                status_code=503,
-                detail="COACHLINE_ADMIN_TOKEN is required for this operation",
-            )
-        if supplied_admin_token is None or not secrets.compare_digest(
-            supplied_admin_token, outbound_admin_token
-        ):
-            raise HTTPException(status_code=401, detail="Invalid admin token")
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -207,20 +236,20 @@ def create_app(
             database_backend=database.backend,
         )
 
-    @application.post(
+    @private_router.post(
         "/profiles", response_model=Profile, status_code=status.HTTP_201_CREATED
     )
     def create_profile(payload: ProfileCreate, coachline: Service) -> Profile:
         return coachline.create_profile(payload)
 
-    @application.get("/profiles/{profile_id}", response_model=Profile)
+    @private_router.get("/profiles/{profile_id}", response_model=Profile)
     def get_profile(profile_id: int, coachline: Service) -> Profile:
         try:
             return coachline.get_profile(profile_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/programs", response_model=Program, status_code=status.HTTP_201_CREATED
     )
     def create_program(payload: ProgramCreate, coachline: Service) -> Program:
@@ -229,14 +258,14 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get("/profiles/{profile_id}/programs", response_model=list[Program])
+    @private_router.get("/profiles/{profile_id}/programs", response_model=list[Program])
     def list_programs(profile_id: int, coachline: Service) -> list[Program]:
         try:
             return coachline.list_programs(profile_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.put(
+    @private_router.put(
         "/profiles/{profile_id}/nutrition-targets/{effective_from}",
         response_model=NutritionTarget,
     )
@@ -253,7 +282,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/nutrition-targets",
         response_model=NutritionTarget | None,
     )
@@ -267,7 +296,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/profiles/{profile_id}/meals",
         response_model=MealEntry,
         status_code=status.HTTP_201_CREATED,
@@ -282,7 +311,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/meals",
         response_model=list[MealEntry],
     )
@@ -296,7 +325,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/meals/{meal_id}",
         response_model=MealEntry,
     )
@@ -310,7 +339,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.put(
+    @private_router.put(
         "/profiles/{profile_id}/meals/{meal_id}",
         response_model=MealEntry,
     )
@@ -327,7 +356,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/nutrition/daily",
         response_model=DailyNutritionSummary,
     )
@@ -341,7 +370,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/sessions",
         response_model=TrainingSession,
         status_code=status.HTTP_201_CREATED,
@@ -354,14 +383,14 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get("/sessions/{session_id}", response_model=TrainingSession)
+    @private_router.get("/sessions/{session_id}", response_model=TrainingSession)
     def get_session(session_id: int, coachline: Service) -> TrainingSession:
         try:
             return coachline.get_session(session_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/sessions", response_model=list[TrainingSession]
     )
     def list_sessions(
@@ -374,7 +403,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.patch(
+    @private_router.patch(
         "/sessions/{session_id}/status", response_model=TrainingSession
     )
     def update_session_status(
@@ -387,7 +416,7 @@ def create_app(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/sessions/{session_id}/result",
         response_model=WorkoutResult,
         status_code=status.HTTP_201_CREATED,
@@ -402,7 +431,7 @@ def create_app(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/sessions/{session_id}/result", response_model=WorkoutResult
     )
     def get_result(session_id: int, coachline: Service) -> WorkoutResult:
@@ -411,7 +440,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.put(
+    @private_router.put(
         "/sessions/{session_id}/prescription", response_model=Prescription
     )
     def save_prescription(
@@ -424,7 +453,7 @@ def create_app(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/sessions/{session_id}/prescription", response_model=Prescription
     )
     def get_prescription(
@@ -435,7 +464,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/today", response_model=list[SessionPlan]
     )
     def todays_workouts(
@@ -448,7 +477,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/sessions/{session_id}/progression",
         response_model=SessionPlan,
         status_code=status.HTTP_201_CREATED,
@@ -463,7 +492,7 @@ def create_app(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/profiles/{profile_id}/messaging-contacts",
         response_model=MessagingContact,
         status_code=status.HTTP_201_CREATED,
@@ -480,7 +509,7 @@ def create_app(
         except MessagingConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/messaging-contacts/{provider}",
         response_model=MessagingContact,
     )
@@ -494,7 +523,7 @@ def create_app(
         except (NotFoundError, MessagingNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post(
+    @private_router.post(
         "/profiles/{profile_id}/messages",
         response_model=SentMessage,
         status_code=status.HTTP_201_CREATED,
@@ -503,11 +532,7 @@ def create_app(
         profile_id: int,
         payload: MessageSendCreate,
         messages: Messaging,
-        supplied_admin_token: Annotated[
-            str | None, Header(alias="X-Coachline-Admin-Token")
-        ] = None,
     ) -> SentMessage:
-        require_admin_token(supplied_admin_token)
         try:
             service.get_profile(profile_id)
             return messages.send_to_profile(profile_id, payload.body)
@@ -518,7 +543,7 @@ def create_app(
         except MessageDeliveryError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    @application.get(
+    @private_router.get(
         "/profiles/{profile_id}/reminder-settings",
         response_model=ReminderSettings,
     )
@@ -530,7 +555,7 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.put(
+    @private_router.put(
         "/profiles/{profile_id}/reminder-settings",
         response_model=ReminderSettings,
     )
@@ -544,14 +569,10 @@ def create_app(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @application.post("/reminders/run-due", response_model=ReminderRunResult)
+    @private_router.post("/reminders/run-due", response_model=ReminderRunResult)
     def run_due_reminders(
         reminder_service: Reminders,
-        supplied_admin_token: Annotated[
-            str | None, Header(alias="X-Coachline-Admin-Token")
-        ] = None,
     ) -> ReminderRunResult:
-        require_admin_token(supplied_admin_token)
         return reminder_service.run_due(clock())
 
     @application.post("/webhooks/twilio/sms")
@@ -578,6 +599,7 @@ def create_app(
             media_type="application/xml",
         )
 
+    application.include_router(private_router)
     return application
 
 

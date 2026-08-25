@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class TwilioSettings:
-    account_sid: str | None = None
+    account_sid: str | None = field(default=None, repr=False)
     auth_token: str | None = field(default=None, repr=False)
-    from_address: str | None = None
+    from_address: str | None = field(default=None, repr=False)
     webhook_url: str | None = None
 
     @classmethod

@@ -39,7 +39,7 @@ def invoke_reminder_runner(
         data=b"",
         headers={
             "Accept": "application/json",
-            "X-Coachline-Admin-Token": admin_token,
+            "Authorization": f"Bearer {admin_token}",
             "X-Request-ID": "render-reminder-cron",
         },
         method="POST",

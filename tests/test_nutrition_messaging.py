@@ -73,8 +73,15 @@ def configured_client(
         twilio_settings=settings,
         twilio_adapter=adapter,
         ai_interpreter=interpreter,
+        admin_token="test-owner-token",
     )
-    return TestClient(app), adapter
+    return (
+        TestClient(
+            app,
+            headers={"Authorization": "Bearer test-owner-token"},
+        ),
+        adapter,
+    )
 
 
 def create_linked_profile(client: TestClient) -> int:

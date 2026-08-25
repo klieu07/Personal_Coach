@@ -1,15 +1,20 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 10
-defines its first reproducible cloud deployment: a Render web service, managed
-PostgreSQL, CI gate, and read-only staging smoke test. The initial Blueprint is
-a free pilot; its reminder scheduler is deliberately deferred until Twilio is
-ready. SQLite remains the zero-service local development default.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 11
+locks its existing Render pilot to one owner credential and defines a
+test-data-only Twilio Virtual Phone workflow while A2P review is pending. The
+Blueprint remains one free web service and one free PostgreSQL database; its
+reminder scheduler remains disabled. SQLite is the zero-service local default.
 
-## Current scope: Phase 10
+## Current scope: Phase 11
 
 Coachline can now:
 
+- require `Authorization: Bearer <COACHLINE_ADMIN_TOKEN>` on every data API;
+- keep health, legal, OpenAPI/Swagger, and signed Twilio webhook routes public;
+- return `401` for invalid owner credentials and fail closed with `503` when
+  owner authentication is not configured;
+- mark private responses `Cache-Control: no-store`;
 - provision its free Render pilot from one reviewed `render.yaml` Blueprint;
 - keep PostgreSQL traffic on Render's private network;
 - block public PostgreSQL connections at the platform boundary;
@@ -62,13 +67,14 @@ Targets are effective-dated, so a future target does not change earlier daily
 summaries. Meals store total calories and macros for the entry, an aware
 `eaten_at` timestamp, optional notes, and a provenance label.
 
-The public meal endpoints always write `user_supplied`. The schema reserves
+The protected meal endpoints always write `user_supplied`. The schema reserves
 `ai_estimate` for confirmed messaging estimates, but an explicit replacement
 of that entry changes the source to `user_supplied`. Daily arithmetic is
 ordinary application code and does not depend on a model.
 
 ```http
 PUT /profiles/1/nutrition-targets/2026-09-01
+Authorization: Bearer <COACHLINE_ADMIN_TOKEN>
 Content-Type: application/json
 
 {
@@ -82,6 +88,7 @@ Content-Type: application/json
 
 ```http
 POST /profiles/1/meals
+Authorization: Bearer <COACHLINE_ADMIN_TOKEN>
 Content-Type: application/json
 
 {
@@ -205,8 +212,10 @@ OPENAI_REASONING_EFFORT=low
 ```
 
 Twilio still requires its Phase 4 values, including the exact public webhook
-URL. `COACHLINE_ADMIN_TOKEN` protects both manual outbound delivery and the
-Phase 6 scheduler endpoint. Load the environment before running locally:
+URL. `COACHLINE_ADMIN_TOKEN` is the single-owner Bearer credential for every
+profile, program, training, nutrition, contact, outbound-message, and reminder
+operation. Swagger's `/docs` page exposes an **Authorize** button for it. Load
+the environment before running locally:
 
 ```bash
 set -a
@@ -243,6 +252,7 @@ quiet-hour start and end values disable the quiet window.
 
 ```http
 PUT /profiles/1/reminder-settings
+Authorization: Bearer <COACHLINE_ADMIN_TOKEN>
 Content-Type: application/json
 
 {
@@ -258,7 +268,7 @@ five minutes:
 
 ```http
 POST /reminders/run-due
-X-Coachline-Admin-Token: <COACHLINE_ADMIN_TOKEN>
+Authorization: Bearer <COACHLINE_ADMIN_TOKEN>
 ```
 
 The endpoint is safe to call repeatedly. It returns counts for synchronized,
@@ -342,6 +352,10 @@ liveness, readiness failure sanitization, request IDs, and log privacy. No real
 SMS, OpenAI request, or external database is used by the automated suite.
 Deployment tests cover the Render topology, private authenticated scheduler
 invocation, health-contract smoke checks, and unsafe URL rejection.
+Security tests enumerate every private OpenAPI operation, verify fail-closed
+Bearer behavior without database writes, check the public-route boundary,
+exercise Twilio signature validation without Bearer auth, and scan tracked
+files for local databases and recognizable live-key patterns.
 
 ## Run with Docker
 
@@ -354,10 +368,11 @@ The container runs as an unprivileged user and checks `/health/ready`. For
 durable local SQLite data, mount `/app/data` as a volume. Production should use
 managed PostgreSQL and inject secrets through the hosting platform.
 
-## Next architectural step
+## Pilot boundary
 
-After the account owner deploys the Phase 10 Blueprint and the read-only staging
-checks pass, the next section should add authenticated user onboarding. That
-will replace direct administrative profile setup with a safe first-run flow
-for creating the owner's profile, linking the verified Twilio contact, and
-setting initial training, nutrition, and reminder preferences.
+Treat the free PostgreSQL database as disposable test storage. Do not enter a
+real name, personal receiving number, health history, workout history,
+nutrition history, or private messages until durable storage is selected and
+tested. Choose that storage path before day 20 of the database lifetime; a paid
+upgrade is a separate owner decision. During A2P review, use only Twilio's
+Virtual Phone workflow in [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md).

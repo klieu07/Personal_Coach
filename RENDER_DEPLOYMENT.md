@@ -1,8 +1,7 @@
 # Deploy Coachline on Render
 
-Phase 10 defines Coachline's first cloud deployment as a Render Blueprint. The
-repository creates no resources until an authorized Render workspace owner
-reviews and deploys `render.yaml`.
+Phase 11 updates the existing free pilot without changing `render.yaml`. Review
+the cost boundary before the single code deployment.
 
 ## What the Blueprint provisions
 
@@ -15,23 +14,24 @@ The API deploys from `main` only after the GitHub Actions check passes.
 
 This is a temporary pilot rather than a production configuration. The free web
 service sleeps after 15 idle minutes, and the free database expires 30 days
-after creation and has no backups. Upgrade or export it before storing important
-data. The reminder cron is omitted until a verified Twilio number is ready.
+after creation and has no backups. Select and test durable storage before
+storing important data. Treat every current record as disposable test data.
+The reminder cron is omitted because a sleeping free service cannot run
+reliable schedules.
 
-## First deployment
+## Pre-deployment cost gate
 
-1. Commit and push the Phase 10 files to GitHub.
-2. Sign in to the Render Dashboard and select **New > Blueprint**.
-3. Connect `klieu07/Personal_Coach` and select its `main` branch.
-4. Keep the default Blueprint path, `render.yaml`.
-5. Confirm the plan shows only two free resources and no cron job.
-6. Supply the Twilio Account SID and Auth Token and, if AI interpretation is
-   wanted, the OpenAI key when Render prompts for variables marked
-   `sync: false`. A Twilio sending number is deliberately added later.
-7. Select **Deploy Blueprint** and wait for `coachline-api` to become healthy.
+1. Finish all local tests and review the complete diff.
+2. Confirm the Render dashboard still labels both `coachline-api` and
+   `coachline-postgres` **Free** and shows sufficient included build usage.
+3. Confirm there is no cron, worker, disk, second database, or paid instance.
+4. Make one commit and one push. Wait for GitHub CI to succeed before allowing
+   Render's `checksPass` deployment.
+5. Run only the read-only health smoke test after the deployment is ready.
 
 Render generates `COACHLINE_ADMIN_TOKEN`; do not replace it with a token stored
-in GitHub.
+in GitHub. Use it only through Render or an ignored local `.env`, and enter it
+through Swagger's **Authorize** dialog when manually administering fixtures.
 
 ## Verify the deployment
 
@@ -56,10 +56,34 @@ web service, with no separate static-site resource:
 These routes contain the public support address but no phone number, API key,
 authentication token, or private database detail.
 
-## Connect Twilio after the URL exists
+## Test during A2P review with Twilio Virtual Phone
 
-1. Obtain and verify an SMS-capable Twilio number. Until then, Coachline can be
-   deployed and health-checked, but it cannot send or receive SMS.
+Do not send carrier SMS to a personal phone while A2P review is pending. Use
+[Twilio Virtual Phone](https://www.twilio.com/docs/messaging/guides/guide-to-using-the-twilio-virtual-phone),
+which can exercise the existing Messaging Service webhook and reply flow
+without registration.
+
+1. Wake the service with `/health/ready` and confirm PostgreSQL reports
+   `ready`.
+2. In `/docs`, authorize with the owner token and create a disposable
+   `Coachline Test` profile in `UTC`.
+3. Add one small sample program, today's scheduled workout, a simple
+   prescription, and sample nutrition targets.
+4. Link only the Virtual Phone address to the profile. Do not add the owner's
+   number or any real health, workout, meal, or private-message data.
+5. In Virtual Phone, select the existing Messaging Service and try `TODAY`,
+   `NUTRITION`, a meal request followed separately by `YES` and `NO`, and a
+   workout-completion request followed by confirmation.
+6. Repeat one delivery to verify idempotency, then try an invalid or unknown
+   command. Inspect only privacy-safe Render logs.
+
+`TODAY`, `NUTRITION`, `YES`, and `NO` are deterministic and do not call OpenAI.
+Natural-language meal and workout tests use the configured OpenAI API and may
+incur OpenAI usage, but they add no Render resource.
+
+## Activate carrier SMS after A2P approval
+
+1. Confirm the campaign and sending number are registered and approved.
 2. In the `coachline-api` environment settings, add `TWILIO_FROM_NUMBER` with
    that Twilio number in E.164 form, such as `+15551234567`.
 3. Add `TWILIO_WEBHOOK_URL` with the exact value:
@@ -71,28 +95,25 @@ authentication token, or private database detail.
 4. Save the environment changes and wait for the redeploy to become healthy.
 5. Configure the same URL as the Twilio number's incoming-message webhook,
    using HTTP `POST`.
-6. Run a health smoke test again before sending an SMS.
-7. Upgrade the web service to an always-on paid plan and add the reminder cron
-   before depending on inbound SMS or scheduled delivery. A sleeping free web
-   service can take about a minute to wake up.
+6. Create the real owner profile and link the personal receiving number only
+   after durable storage is selected.
+7. Wake the service, run the health smoke test, and send one controlled `TODAY`
+   SMS. Inspect Twilio and Render status metadata without exposing message
+   bodies, phone numbers, or credentials.
+8. Make a separate always-on hosting decision before depending on inbound SMS.
+   Make another explicit decision before adding any reminder scheduler.
 
 Do not add a personal phone number to Render variables. Phone addresses belong
 in Coachline's database through the messaging-contact API.
 
-## Staged SMS check
-
-A live test is optional and should happen only after PostgreSQL readiness,
-Twilio signature validation, and the always-on web upgrade succeed. Create one
-profile and its Twilio contact through the API, send `TODAY`, and confirm that
-the reply corresponds to that profile. Do not test mutation intents until the
-read-only command succeeds.
-
 ## Upgrade or clean up
 
-Before day 30, upgrade `coachline-postgres` to a paid plan or export and move
-its data. Render deletes an expired free database after its grace period.
-Before enabling proactive reminders, restore the `coachline-reminders` cron
-definition from commit `69a5622` or add an equivalent Render cron job.
+Before day 20, choose and locally test a durable database migration. Do not
+upgrade automatically; a paid Render database is a separate explicit decision.
+Free PostgreSQL expires after 30 days and is deleted after its grace period.
+Before enabling proactive reminders, make an always-on hosting decision and
+then explicitly add a scheduler; do not restore one merely because old code
+exists.
 
 Use the Render service's **Rollback** action to restore the previous image when
 an application deploy fails. Database migrations are forward-only, so do not
