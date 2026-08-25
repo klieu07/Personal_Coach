@@ -2,7 +2,7 @@
 
 This runbook describes the production boundary introduced in Phase 9 and the
 Render deployment selected in Phase 10. It does not create a cloud account or
-deploy billed resources automatically.
+deploy resources automatically.
 
 ## Runtime topology
 
@@ -34,8 +34,8 @@ SQLite development.
 ## Deployment sequence
 
 The concrete Render procedure is in `RENDER_DEPLOYMENT.md`; `render.yaml` is the
-infrastructure source of truth. The account owner must review current pricing
-and secrets before deploying it.
+infrastructure source of truth. The initial free pilot omits the reminder cron
+and must be upgraded before the free database expires.
 
 1. Provision a managed PostgreSQL database with encrypted connections,
    automated backups, and restricted network access.

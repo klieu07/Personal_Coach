@@ -2,15 +2,16 @@
 
 Coachline is a personal, cloud-hosted training and nutrition agent. Phase 10
 defines its first reproducible cloud deployment: a Render web service, managed
-PostgreSQL, private reminder scheduler, CI gate, and read-only staging smoke
-test. SQLite remains the zero-service local development default.
+PostgreSQL, CI gate, and read-only staging smoke test. The initial Blueprint is
+a free pilot; its reminder scheduler is deliberately deferred until Twilio is
+ready. SQLite remains the zero-service local development default.
 
 ## Current scope: Phase 10
 
 Coachline can now:
 
-- provision its Render topology from one reviewed `render.yaml` Blueprint;
-- keep PostgreSQL and scheduler traffic on Render's private network;
+- provision its free Render pilot from one reviewed `render.yaml` Blueprint;
+- keep PostgreSQL traffic on Render's private network;
 - block public PostgreSQL connections at the platform boundary;
 - wait for GitHub Actions tests before automatic application deployment;
 - run a strict, read-only deployment smoke test against production health
@@ -231,7 +232,9 @@ restore, and rollback procedures.
 
 The provider-specific activation and verification steps are in
 [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md). Deploying the Blueprint creates
-billed Render resources and therefore remains an explicit account-owner action.
+free-tier Render resources and remains an explicit account-owner action. Free
+PostgreSQL expires after 30 days and must be upgraded or replaced before it
+contains important data.
 
 ## Configure and run reminders
 

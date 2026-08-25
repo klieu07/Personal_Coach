@@ -134,9 +134,10 @@ def test_render_blueprint_has_private_database_and_no_secrets() -> None:
     blueprint = Path("render.yaml").read_text(encoding="utf-8")
 
     assert "healthCheckPath: /health/ready" in blueprint
-    assert blueprint.count("autoDeployTrigger: checksPass") == 2
-    assert "schedule: \"*/5 * * * *\"" in blueprint
-    assert "property: hostport" in blueprint
+    assert blueprint.count("autoDeployTrigger: checksPass") == 1
+    assert blueprint.count("plan: free") == 2
+    assert "coachline-reminders" not in blueprint
+    assert "type: cron" not in blueprint
     assert "property: connectionString" in blueprint
     assert "ipAllowList: []" in blueprint
     assert "generateValue: true" in blueprint

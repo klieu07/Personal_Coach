@@ -13,16 +13,15 @@ production operations boundaries.
 
 Phase 10 selects Render and adds a reproducible deployment package:
 
-- `render.yaml` defines a paid starter Docker web service, a private PostgreSQL
-  18 database, and a five-minute reminder cron job in Oregon;
+- `render.yaml` defines a free pilot with a Docker web service and PostgreSQL
+  18 database in Oregon;
 - the database's public IP allow list is empty;
 - the API receives Render's internal database connection string;
-- the cron receives the API's private address and generated admin token through
-  service references;
+- the billed reminder cron is deferred until a verified Twilio number exists;
 - the Twilio Account SID/Auth Token and OpenAI key use `sync: false` and never
   enter Git;
 - GitHub Actions runs tests and compilation with Python 3.12;
-- both Render services wait for CI checks before deploying;
+- the Render web service waits for CI checks before deploying;
 - `python -m app.commands.run_reminders` performs one authenticated internal
   scheduler invocation and exits;
 - `python -m app.commands.smoke_test <https-url>` validates public health and
@@ -30,10 +29,15 @@ Phase 10 selects Render and adds a reproducible deployment package:
 - `RENDER_DEPLOYMENT.md` documents account activation, cost review, Twilio URL
   setup, staged testing, rollback, and cost shutdown.
 
-No Render resource has been created because there is no connected Render
-account in this workspace. Deploying the Blueprint is an explicit billed action
-for the account owner. No SMS, OpenAI request, or external database request is
-made by the automated suite, and no personal phone number is tracked.
+No Render resource has been created from this workspace. The Blueprint deploy
+is an explicit account-owner action. No SMS, OpenAI request, or external
+database request is made by the automated suite, and no personal phone number
+is tracked.
+
+The pilot is intentionally temporary: the free web service sleeps after 15
+idle minutes, and free PostgreSQL expires 30 days after creation and has no
+backups. Upgrade or migrate it before storing important data. An always-on web
+plan and the reminder cron are required before relying on Twilio delivery.
 
 ## Verification
 
@@ -57,7 +61,7 @@ and shows its resource plan before the account owner confirms deployment.
 Follow `RENDER_DEPLOYMENT.md` after committing and pushing:
 
 1. Connect `klieu07/Personal_Coach` in **New > Blueprint** on Render.
-2. Review current pricing for all three resources.
+2. Confirm Render shows two free resources and no cron job.
 3. Supply the Twilio Account SID/Auth Token and optional OpenAI key. Add the
    Twilio sending number only after it is obtained and verified.
 4. Deploy and wait for PostgreSQL readiness.

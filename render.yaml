@@ -7,7 +7,7 @@ services:
   - type: web
     name: coachline-api
     runtime: docker
-    plan: starter
+    plan: free
     region: oregon
     branch: main
     autoDeployTrigger: checksPass
@@ -37,35 +37,11 @@ services:
       - key: TWILIO_AUTH_TOKEN
         sync: false
 
-  - type: cron
-    name: coachline-reminders
-    runtime: docker
-    plan: starter
-    region: oregon
-    branch: main
-    autoDeployTrigger: checksPass
-    schedule: "*/5 * * * *"
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: python -m app.commands.run_reminders
-    envVars:
-      - key: COACHLINE_API_HOSTPORT
-        fromService:
-          type: web
-          name: coachline-api
-          property: hostport
-      - key: COACHLINE_ADMIN_TOKEN
-        fromService:
-          type: web
-          name: coachline-api
-          envVarKey: COACHLINE_ADMIN_TOKEN
-
 databases:
   - name: coachline-postgres
-    plan: basic-256mb
+    plan: free
     region: oregon
     postgresMajorVersion: "18"
     databaseName: coachline
     user: coachline
     ipAllowList: []
-    storageAutoscalingEnabled: true
