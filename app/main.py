@@ -1,14 +1,44 @@
 import os
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel
 
 from app.database import Database
+from app.messaging.config import TwilioSettings
+from app.messaging.models import (
+    MessageProvider,
+    MessageSendCreate,
+    MessagingContact,
+    MessagingContactCreate,
+    SentMessage,
+)
+from app.messaging.repository import (
+    MessagingConflictError,
+    MessagingNotFoundError,
+    SQLiteMessagingRepository,
+)
+from app.messaging.service import MessagingService
+from app.messaging.twilio import (
+    InvalidInboundMessageError,
+    MessageDeliveryError,
+    MessagingNotConfiguredError,
+    TwilioAdapter,
+)
 from app.repository import ConflictError, NotFoundError, SQLiteCoachlineRepository
 from app.schemas import (
     Prescription,
@@ -34,7 +64,13 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
 
 
-def create_app(database_path: str | Path | None = None) -> FastAPI:
+def create_app(
+    database_path: str | Path | None = None,
+    *,
+    twilio_settings: TwilioSettings | None = None,
+    twilio_adapter: TwilioAdapter | None = None,
+    admin_token: str | None = None,
+) -> FastAPI:
     """Create a Coachline application with an isolated persistence layer."""
 
     path = database_path or os.getenv(
@@ -42,18 +78,31 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     )
     database = Database(path)
     service = CoachlineService(SQLiteCoachlineRepository(database))
+    settings = twilio_settings or TwilioSettings.from_env()
+    outbound_admin_token = admin_token or os.getenv("COACHLINE_ADMIN_TOKEN")
+    adapter = twilio_adapter
+    if adapter is None and settings.can_validate_webhooks:
+        adapter = TwilioAdapter(settings)
+    messaging = MessagingService(
+        service, SQLiteMessagingRepository(database), sender=adapter
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.3.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.4.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service
 
     Service = Annotated[CoachlineService, Depends(get_service)]
+
+    def get_messaging() -> MessagingService:
+        return messaging
+
+    Messaging = Annotated[MessagingService, Depends(get_messaging)]
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -211,6 +260,93 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.post(
+        "/profiles/{profile_id}/messaging-contacts",
+        response_model=MessagingContact,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def add_messaging_contact(
+        profile_id: int,
+        payload: MessagingContactCreate,
+        messages: Messaging,
+    ) -> MessagingContact:
+        try:
+            return messages.add_contact(profile_id, payload)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except MessagingConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/messaging-contacts/{provider}",
+        response_model=MessagingContact,
+    )
+    def get_messaging_contact(
+        profile_id: int,
+        provider: MessageProvider,
+        messages: Messaging,
+    ) -> MessagingContact:
+        try:
+            return messages.get_contact(profile_id, provider)
+        except (NotFoundError, MessagingNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.post(
+        "/profiles/{profile_id}/messages",
+        response_model=SentMessage,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def send_message(
+        profile_id: int,
+        payload: MessageSendCreate,
+        messages: Messaging,
+        supplied_admin_token: Annotated[
+            str | None, Header(alias="X-Coachline-Admin-Token")
+        ] = None,
+    ) -> SentMessage:
+        if not outbound_admin_token:
+            raise HTTPException(
+                status_code=503,
+                detail="COACHLINE_ADMIN_TOKEN is required for outbound SMS",
+            )
+        if supplied_admin_token is None or not secrets.compare_digest(
+            supplied_admin_token, outbound_admin_token
+        ):
+            raise HTTPException(status_code=401, detail="Invalid admin token")
+        try:
+            service.get_profile(profile_id)
+            return messages.send_to_profile(profile_id, payload.body)
+        except (NotFoundError, MessagingNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (MessagingNotConfiguredError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except MessageDeliveryError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.post("/webhooks/twilio/sms")
+    async def receive_twilio_sms(request: Request) -> Response:
+        if adapter is None:
+            raise HTTPException(
+                status_code=503,
+                detail="TWILIO_AUTH_TOKEN is required for Twilio webhooks",
+            )
+        parameters = await request.form()
+        signature = request.headers.get("X-Twilio-Signature", "")
+        validation_url = settings.webhook_url or str(request.url)
+        if not signature or not adapter.validate_webhook(
+            validation_url, parameters, signature
+        ):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+        try:
+            inbound = adapter.parse_inbound(parameters)
+        except (InvalidInboundMessageError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        outcome = messaging.handle_inbound(inbound)
+        return Response(
+            content=adapter.render_twiml(outcome.reply_body),
+            media_type="application/xml",
+        )
 
     return application
 

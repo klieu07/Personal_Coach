@@ -97,7 +97,8 @@ class CoachlineService:
                     )
                 if completed_set.set_number > maximum:
                     raise ConflictError(
-                        f"{completed_set.exercise_name} has only {maximum} prescribed sets"
+                        f"{completed_set.exercise_name} has only "
+                        f"{maximum} prescribed sets"
                     )
         return self.repository.record_result(session_id, payload)
 

@@ -1,94 +1,126 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 3
-turns its persistent Phase 2 data into actionable lifting and running
-workflows.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 4
+connects its structured training workflows to SMS through a provider-neutral
+messaging layer and a secure Twilio adapter.
 
-## Current scope: Phase 3
+## Current scope: Phase 4
 
 Coachline can now:
 
-- create user profiles with validated IANA timezones;
-- create lifting or running programs;
-- schedule sessions and track planned, completed, or skipped state;
-- attach ordered lifting exercises or running segments to a session;
-- retrieve a profile's planned workouts for today or a supplied date;
-- record lifting sets or running distance, duration, and heart-rate metrics;
-- retrieve a structured workout result; and
-- generate the next planned session with deterministic progression.
+- link a profile to a Twilio SMS phone number;
+- validate inbound Twilio webhooks using the official SDK and every received
+  form parameter;
+- normalize provider webhooks into Coachline message models;
+- return valid TwiML replies;
+- answer the deterministic `TODAY` command from stored training data;
+- make webhook retries idempotent using Twilio's message SID;
+- queue outbound SMS through a provider interface;
+- protect manual outbound sends with a separate admin token; and
+- retain inbound messages, replies, and outbound message status in SQLite.
 
-SQLite retains this state across restarts. Versioned SQL migrations upgrade an
-existing Phase 2 database without replacing it. Services still depend on a
-repository contract, leaving a clean path to PostgreSQL.
+No real SMS is sent during tests. A fake Twilio client verifies the adapter
+boundary.
 
-Twilio, OpenAI, BlueBubbles, nutrition, reminders, and cloud deployment remain
-outside this phase.
+OpenAI interpretation, free-form coaching, nutrition, reminders, delivery
+status callbacks, and cloud deployment remain outside this phase.
 
 ## How this supports the final design
 
-The final conversational coach will use this domain as its source of truth:
+Twilio is a transport adapter, not the owner of Coachline behavior:
 
 ```text
-Twilio SMS / BlueBubbles
-            |
-AI interpretation and confirmation
-            |
-Coachline training workflows
-            |
-Repository contract
-            |
-SQLite now / PostgreSQL later
+Twilio webhook                    Future BlueBubbles adapter
+       |                                    |
+       +---------- normalized messages -----+
+                            |
+                  messaging workflows
+                            |
+                   Coachline services
+                            |
+          SQLite now / PostgreSQL later
 ```
 
-An AI adapter will eventually translate a message such as “I did all three
-squat sets at 102.5 kg” into a validated result command. It will not decide how
-sessions are stored or progressed. Keeping those rules in ordinary Python
-makes them predictable, testable, and reusable by every messaging channel.
+The normalized messaging service handles contacts, idempotency, command
+routing, and message history. The Twilio adapter alone knows about Twilio form
+parameters, `X-Twilio-Signature`, TwiML, and the Messages API. A future
+BlueBubbles adapter can therefore reuse training and message-routing behavior.
 
-## Structured prescriptions
+## Supported SMS behavior
 
-A lifting prescription contains ordered exercises with sets, reps, optional
-target weight, and optional rest time. A running prescription contains ordered
-warmup, work, recovery, steady, or cooldown segments. Each running segment
-requires a distance or duration and may include a target pace.
+A linked user can send any of these commands:
 
-The prescription discipline must match its program. Prescriptions can only be
-changed while a session is planned.
+```text
+TODAY
+WORKOUT
+TODAY'S WORKOUT
+```
 
-## Progression rules
+Coachline replies with today's planned sessions and their structured lifting
+or running prescription. Other messages receive a safe acknowledgement that
+free-form AI coaching is not enabled yet. Unlinked phone numbers receive
+linking instructions and cannot access profile data.
 
-Only completed sessions with a prescription can generate a progression.
+## Twilio security
 
-- Lifting adds `lifting_weight_increment_kg` to every exercise that has a
-  target weight. The default is 2.5 kg. Bodyweight exercises remain unchanged.
-- Running increases distance for work and steady segments by
-  `running_increase_percent`, or duration when the segment has no distance. The
-  default is 10%. Warmup, recovery, and cooldown segments remain unchanged.
+The webhook verifies `X-Twilio-Signature` with Twilio's official
+`RequestValidator`. Validation uses every received form field and the exact
+public webhook URL configured in `TWILIO_WEBHOOK_URL`. Invalid signatures
+receive HTTP 403 before message processing.
 
-The client supplies the date for the new session. Progression creates a new
-planned session and leaves the completed source session unchanged.
+The manual outbound endpoint additionally requires
+`X-Coachline-Admin-Token`. This prevents a public caller from creating paid
+Twilio sends merely by knowing a profile ID.
+
+See Twilio's official documentation for [incoming message
+webhooks](https://www.twilio.com/docs/messaging/guides/webhook-request),
+[webhook security](https://www.twilio.com/docs/usage/webhooks/webhooks-security),
+and the [Messages API](https://www.twilio.com/docs/messaging/api/message-resource).
+
+## Configuration
+
+Create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Set these values:
+
+```dotenv
+COACHLINE_DATABASE_PATH=data/coachline.sqlite3
+COACHLINE_ADMIN_TOKEN=use-a-long-random-value
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your-primary-auth-token
+TWILIO_FROM_NUMBER=+15555550100
+TWILIO_WEBHOOK_URL=https://your-public-host/webhooks/twilio/sms
+```
+
+Do not commit `.env`. Coachline reads process environment variables, so load
+the file before starting locally:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+Configure the Twilio phone number's incoming-message webhook to use the exact
+`TWILIO_WEBHOOK_URL` value with HTTP `POST`. For local development, that URL
+must be an HTTPS tunnel or another public address that reaches Coachline.
 
 ## API
 
+The Phase 0–3 profile, program, session, prescription, result, and progression
+endpoints remain available. Phase 4 adds:
+
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Check application availability |
-| `POST` | `/profiles` | Create a profile |
-| `GET` | `/profiles/{profile_id}` | Retrieve a profile |
-| `POST` | `/programs` | Create a lifting or running program |
-| `GET` | `/profiles/{profile_id}/programs` | List programs |
-| `POST` | `/sessions` | Schedule a session |
-| `GET` | `/sessions/{session_id}` | Retrieve a session |
-| `GET` | `/profiles/{profile_id}/sessions` | List sessions, optionally by status |
-| `PATCH` | `/sessions/{session_id}/status` | Change session state |
-| `PUT` | `/sessions/{session_id}/prescription` | Create or replace a prescription |
-| `GET` | `/sessions/{session_id}/prescription` | Retrieve a prescription |
-| `GET` | `/profiles/{profile_id}/today` | Retrieve planned workouts for local today |
-| `POST` | `/sessions/{session_id}/result` | Record and complete a workout |
-| `GET` | `/sessions/{session_id}/result` | Retrieve its structured result |
-| `POST` | `/sessions/{session_id}/progression` | Generate the next session |
+| `POST` | `/profiles/{profile_id}/messaging-contacts` | Link an E.164 address |
+| `GET` | `/profiles/{profile_id}/messaging-contacts/{provider}` | Retrieve a contact |
+| `POST` | `/profiles/{profile_id}/messages` | Send an admin-authorized message |
+| `POST` | `/webhooks/twilio/sms` | Receive a signed Twilio SMS webhook |
 
-Use `?on=YYYY-MM-DD` with the today endpoint to request an explicit date.
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
 while the server is running.
 
@@ -103,10 +135,7 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
 ```
 
-Optionally copy `.env.example` to `.env` and change the database path. The
-default database is `data/coachline.sqlite3`.
-
-Start the API:
+Start the API after loading any environment file:
 
 ```bash
 uvicorn app.main:app --reload
@@ -121,21 +150,22 @@ that has not already run.
 pytest
 ```
 
-Tests use isolated databases and cover persistence, status transitions,
-structured prescriptions and results, progression, mismatched disciplines,
-missing resources, and the health endpoint.
+Tests cover prior training behavior plus signature rejection and acceptance,
+all-parameter validation, linked and unlinked senders, retry idempotency,
+contact conflicts, mocked outbound SMS, and missing configuration.
 
 ## Run with Docker
 
 ```bash
 docker build -t coachline .
-docker run --rm -p 8000:8000 coachline
+docker run --rm -p 8000:8000 --env-file .env coachline
 ```
 
 For durable Docker data, mount `/app/data` as a volume.
 
 ## Next architectural step
 
-Phase 4 should add a provider-neutral messaging interface and a Twilio SMS
-adapter. It should translate inbound and outbound transport events only; the
-training rules in this phase should remain independent of Twilio.
+Phase 5 should add an AI interpretation boundary that converts free-form text
+into typed, reviewable Coachline commands. AI output must be validated before
+it can modify training state, and deterministic commands such as `TODAY` should
+continue to work without an AI provider.
