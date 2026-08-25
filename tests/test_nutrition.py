@@ -191,6 +191,7 @@ def test_user_replacement_overrides_estimate_and_enforces_ownership(
                     (profile_id, name, eaten_at, calories_kcal, protein_g,
                      carbohydrates_g, fat_g, fiber_g, value_source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ai_estimate')
+                RETURNING id
                 """,
                 (
                     owner_id,
@@ -203,7 +204,7 @@ def test_user_replacement_overrides_estimate_and_enforces_ownership(
                     5,
                 ),
             )
-            meal_id = cursor.lastrowid
+            meal_id = cursor.fetchone()["id"]
 
         hidden = client.get(f"/profiles/{other_id}/meals/{meal_id}")
         replaced = client.put(

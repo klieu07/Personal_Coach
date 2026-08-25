@@ -48,8 +48,8 @@ class NutritionRepository(Protocol):
     ) -> MealEntry: ...
 
 
-class SQLiteNutritionRepository:
-    """Store targets and meal entries in SQLite."""
+class SQLNutritionRepository:
+    """Store targets and meal entries through portable SQL."""
 
     _nutrition_columns = (
         "calories_kcal, protein_g, carbohydrates_g, fat_g, fiber_g"
@@ -124,6 +124,7 @@ class SQLiteNutritionRepository:
                     (profile_id, name, eaten_at, calories_kcal, protein_g,
                      carbohydrates_g, fat_g, fiber_g, notes, value_source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     profile_id,
@@ -134,8 +135,9 @@ class SQLiteNutritionRepository:
                     source.value,
                 ),
             )
+            meal_id = int(cursor.fetchone()["id"])
         return MealEntry(
-            id=cursor.lastrowid,
+            id=meal_id,
             profile_id=profile_id,
             value_source=source,
             **payload.model_dump(),

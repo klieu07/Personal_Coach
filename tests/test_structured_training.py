@@ -260,7 +260,7 @@ def test_phase2_database_is_upgraded_in_place(tmp_path: Path) -> None:
             )
             """
         )
-        connection.executescript(phase2_migration)
+        connection.execute_script(phase2_migration)
         connection.execute(
             "INSERT INTO schema_migrations (version) VALUES (?)",
             ("001_training_core",),

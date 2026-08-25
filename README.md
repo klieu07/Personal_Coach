@@ -1,13 +1,22 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 8
-connects the factual nutrition ledger to secure messaging and validated AI on
-top of the foundations built in Phases 0–7.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 9
+makes the application deployable with PostgreSQL, production health checks,
+structured request logs, and an explicit operations runbook. SQLite remains
+the zero-service local development default.
 
-## Current scope: Phase 8
+## Current scope: Phase 9
 
 Coachline can now:
 
+- select SQLite or PostgreSQL from configuration without changing services;
+- apply backend-specific migrations safely during concurrent startup;
+- expose separate liveness and database-aware readiness checks;
+- emit correlated JSON request logs without bodies, query strings, or phone
+  numbers;
+- run in its container as a non-root user;
+- follow documented deployment, scheduler, backup, restore, and rollback
+  procedures;
 - answer `NUTRITION`, `MACROS`, and `CALORIES` deterministically without AI;
 - interpret free-form nutrition-summary questions as a typed read-only intent;
 - propose meal nutrition through a strict, nested structured-output schema;
@@ -135,9 +144,9 @@ profile safety identifier.
 
 Each enabled profile supplies a reminder time and quiet-hour window. A
 scheduler calls `POST /reminders/run-due` periodically. Coachline synchronizes
-planned sessions into SQLite, converts each local reminder time to UTC, claims
-due jobs, and sends them through the same messaging boundary used for manual
-outbound messages.
+planned sessions into the configured database, converts each local reminder
+time to UTC, claims due jobs, and sends them through the same messaging
+boundary used for manual outbound messages.
 
 Jobs are unique by training session. Successful, cancelled, and permanently
 failed jobs are terminal. Temporary failures retry after 5 and 10 minutes, up
@@ -161,13 +170,16 @@ deterministic router -------- AI interpreter
                              |
                  validation and confirmation
                              |
-             training + nutrition services
+                 training + nutrition services
                              |
-                  SQLite / future PostgreSQL
+             portable SQL repositories + migrations
+                    /                    \
+          local SQLite             cloud PostgreSQL
 ```
 
 AI interpretation is replaceable. Training state, ownership, approval, and
-progression remain ordinary application code.
+progression remain ordinary application code. The same principle now applies
+to infrastructure: database choice and hosting do not change domain behavior.
 
 ## Configuration
 
@@ -177,7 +189,7 @@ Create a local environment file and keep it untracked:
 cp .env.example .env
 ```
 
-The Phase 5 settings are:
+The AI settings are:
 
 ```dotenv
 OPENAI_API_KEY=replace-with-project-api-key
@@ -197,6 +209,19 @@ set +a
 
 Never commit `.env` or insert real API keys, auth tokens, or personal phone
 numbers into tests and documentation.
+
+Local development uses `COACHLINE_DATABASE_PATH`. A production runtime should
+instead inject a managed PostgreSQL connection string:
+
+```dotenv
+COACHLINE_DATABASE_URL=postgresql://coachline:<password>@<host>:5432/coachline
+PORT=8000
+COACHLINE_LOG_LEVEL=INFO
+```
+
+When `COACHLINE_DATABASE_URL` is set it takes precedence over the local path.
+See [OPERATIONS.md](OPERATIONS.md) for deployment, scheduler, secret, backup,
+restore, and rollback procedures.
 
 ## Configure and run reminders
 
@@ -249,12 +274,17 @@ Structured lifting-set and running-metric entry remain available through the
 API. Phase 5's SMS completion intent records the factual summary supplied by
 the user.
 
-## API
+## Health and API
 
 The earlier health, training, contact, outbound-message, signed Twilio webhook,
-validated AI, and proactive reminder workflows remain available. Phase 8 adds
-typed nutrition read and confirmed estimate intents to messaging. No endpoint
-or model response can bypass the confirmation required to save an estimate.
+validated AI, proactive reminder, and nutrition workflows remain available.
+No endpoint or model response can bypass the confirmation required to save an
+estimate.
+
+- `GET /health` preserves the original exact `{"status":"ok"}` contract.
+- `GET /health/live` checks that the API process can answer requests.
+- `GET /health/ready` also checks the configured database and reports its
+  backend. It returns HTTP 503 without exposing connection details on failure.
 
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
 while the server is running.
@@ -269,8 +299,9 @@ python -m pip install -e '.[dev]'
 uvicorn app.main:app --reload
 ```
 
-Startup creates the database and applies every migration in `app/migrations/`
-that has not already run.
+Startup creates or connects to the database and applies every backend-specific
+migration that has not already run. PostgreSQL startup uses an advisory
+transaction lock so multiple application instances cannot race migrations.
 
 ## Run tests
 
@@ -292,6 +323,10 @@ validation, provenance labeling, and authoritative user replacement.
 Nutrition messaging tests cover deterministic no-AI summaries, typed read-only
 interpretation, strict nested output validation, confirmation, cancellation,
 timestamp rejection, estimate provenance, and duplicate webhook delivery.
+Database and operations tests cover SQLite selection, PostgreSQL connection
+translation and native migrations, migration locking and idempotency,
+liveness, readiness failure sanitization, request IDs, and log privacy. No real
+SMS, OpenAI request, or external database is used by the automated suite.
 
 ## Run with Docker
 
@@ -300,11 +335,13 @@ docker build -t coachline .
 docker run --rm -p 8000:8000 --env-file .env coachline
 ```
 
-For durable Docker data, mount `/app/data` as a volume.
+The container runs as an unprivileged user and checks `/health/ready`. For
+durable local SQLite data, mount `/app/data` as a volume. Production should use
+managed PostgreSQL and inject secrets through the hosting platform.
 
 ## Next architectural step
 
-Phase 9 can add production deployment and operations: a PostgreSQL adapter,
-cloud runtime configuration, managed secrets, scheduled reminder invocation,
-database backup and restore procedures, and observable health checks. SQLite
-should remain supported for local development.
+Phase 10 should deploy this Phase 9 artifact to a user-selected cloud platform,
+provision managed PostgreSQL and scheduler services, and run a staged
+end-to-end verification. That step requires an explicit platform choice and
+account credentials; this repository deliberately contains neither.

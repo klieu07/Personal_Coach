@@ -1,9 +1,8 @@
-"""SQLite storage for contacts and message idempotency."""
+"""Portable SQL storage for contacts and message idempotency."""
 
-import sqlite3
 from typing import Protocol
 
-from app.database import Database
+from app.database import DATABASE_INTEGRITY_ERRORS, Database
 from app.messaging.models import (
     InboundMessage,
     MessagingContact,
@@ -47,7 +46,7 @@ class MessagingRepository(Protocol):
     def save_outbound(self, contact_id: int, message: SentMessage) -> None: ...
 
 
-class SQLiteMessagingRepository:
+class SQLMessagingRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
@@ -60,15 +59,17 @@ class SQLiteMessagingRepository:
                     """
                     INSERT INTO messaging_contacts (profile_id, provider, address)
                     VALUES (?, ?, ?)
+                    RETURNING id
                     """,
                     (profile_id, payload.provider.value, payload.address),
                 )
-        except sqlite3.IntegrityError as exc:
+                contact_id = int(cursor.fetchone()["id"])
+        except DATABASE_INTEGRITY_ERRORS as exc:
             raise MessagingConflictError(
                 "That messaging address or profile provider is already linked"
             ) from exc
         return MessagingContact(
-            id=cursor.lastrowid, profile_id=profile_id, **payload.model_dump()
+            id=contact_id, profile_id=profile_id, **payload.model_dump()
         )
 
     def get_contact_for_profile(
@@ -143,7 +144,7 @@ class SQLiteMessagingRepository:
                         reply_body,
                     ),
                 )
-        except sqlite3.IntegrityError as exc:
+        except DATABASE_INTEGRITY_ERRORS as exc:
             raise MessagingConflictError("Inbound message already exists") from exc
 
     def save_outbound(self, contact_id: int, message: SentMessage) -> None:

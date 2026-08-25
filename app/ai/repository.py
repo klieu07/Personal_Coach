@@ -24,7 +24,7 @@ class AIRepository(Protocol):
     def clear_pending(self, contact_id: int) -> None: ...
 
 
-class SQLiteAIRepository:
+class SQLAIRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 

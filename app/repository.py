@@ -1,10 +1,14 @@
 """Persistence boundary for Coachline's training domain."""
 
-import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Any, Protocol
 
-from app.database import Database
+from app.database import (
+    DATABASE_INTEGRITY_ERRORS,
+    Database,
+    DatabaseConnection,
+)
 from app.schemas import (
     Discipline,
     LiftingExercise,
@@ -36,7 +40,7 @@ class ConflictError(Exception):
 
 
 class CoachlineRepository(Protocol):
-    """Storage contract that a future PostgreSQL adapter can implement."""
+    """Portable storage contract for the training domain."""
 
     def create_profile(self, payload: ProfileCreate) -> Profile: ...
 
@@ -77,8 +81,8 @@ class CoachlineRepository(Protocol):
     ) -> SessionPlan: ...
 
 
-class SQLiteCoachlineRepository:
-    """Store the training domain in SQLite behind a replaceable boundary."""
+class SQLCoachlineRepository:
+    """Store the training domain through the portable SQL boundary."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -86,10 +90,14 @@ class SQLiteCoachlineRepository:
     def create_profile(self, payload: ProfileCreate) -> Profile:
         with self.database.session() as connection:
             cursor = connection.execute(
-                "INSERT INTO profiles (name, timezone) VALUES (?, ?)",
+                """
+                INSERT INTO profiles (name, timezone) VALUES (?, ?)
+                RETURNING id
+                """,
                 (payload.name, payload.timezone),
             )
-            return Profile(id=cursor.lastrowid, **payload.model_dump())
+            profile_id = int(cursor.fetchone()["id"])
+            return Profile(id=profile_id, **payload.model_dump())
 
     def get_profile(self, profile_id: int) -> Profile:
         with self.database.session() as connection:
@@ -108,10 +116,12 @@ class SQLiteCoachlineRepository:
                 """
                 INSERT INTO programs (profile_id, name, discipline)
                 VALUES (?, ?, ?)
+                RETURNING id
                 """,
                 (payload.profile_id, payload.name, payload.discipline.value),
             )
-            return Program(id=cursor.lastrowid, active=True, **payload.model_dump())
+            program_id = int(cursor.fetchone()["id"])
+            return Program(id=program_id, active=True, **payload.model_dump())
 
     def list_programs(self, profile_id: int) -> list[Program]:
         self.get_profile(profile_id)
@@ -149,6 +159,7 @@ class SQLiteCoachlineRepository:
                 INSERT INTO training_sessions
                     (program_id, scheduled_for, title, notes)
                 VALUES (?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     payload.program_id,
@@ -157,8 +168,9 @@ class SQLiteCoachlineRepository:
                     payload.notes,
                 ),
             )
+            session_id = int(cursor.fetchone()["id"])
             return TrainingSession(
-                id=cursor.lastrowid,
+                id=session_id,
                 status=SessionStatus.PLANNED,
                 **payload.model_dump(),
             )
@@ -243,6 +255,7 @@ class SQLiteCoachlineRepository:
                 INSERT INTO training_sessions
                     (program_id, scheduled_for, title, notes)
                 VALUES (?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     payload.program_id,
@@ -251,8 +264,9 @@ class SQLiteCoachlineRepository:
                     payload.notes,
                 ),
             )
+            session_id = int(cursor.fetchone()["id"])
             session = TrainingSession(
-                id=cursor.lastrowid,
+                id=session_id,
                 status=SessionStatus.PLANNED,
                 **payload.model_dump(),
             )
@@ -308,9 +322,11 @@ class SQLiteCoachlineRepository:
                     """
                     INSERT INTO workout_results (session_id, summary, completed_at)
                     VALUES (?, ?, ?)
+                    RETURNING id
                     """,
                     (session_id, payload.summary, completed_at.isoformat()),
                 )
+                result_id = int(cursor.fetchone()["id"])
                 connection.execute(
                     """
                     UPDATE training_sessions SET status = 'completed'
@@ -327,7 +343,7 @@ class SQLiteCoachlineRepository:
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            cursor.lastrowid,
+                            result_id,
                             position,
                             result.exercise_name,
                             result.set_number,
@@ -345,17 +361,17 @@ class SQLiteCoachlineRepository:
                         VALUES (?, ?, ?, ?)
                         """,
                         (
-                            cursor.lastrowid,
+                            result_id,
                             metrics.distance_m,
                             metrics.duration_seconds,
                             metrics.average_heart_rate,
                         ),
                     )
-        except sqlite3.IntegrityError as exc:
+        except DATABASE_INTEGRITY_ERRORS as exc:
             raise ConflictError(f"Session {session_id} already has a result") from exc
 
         return WorkoutResult(
-            id=cursor.lastrowid,
+            id=result_id,
             session_id=session_id,
             summary=payload.summary,
             completed_at=completed_at,
@@ -417,7 +433,7 @@ class SQLiteCoachlineRepository:
 
     @staticmethod
     def _insert_prescription(
-        connection: sqlite3.Connection,
+        connection: DatabaseConnection,
         session_id: int,
         prescription: Prescription,
     ) -> None:
@@ -460,7 +476,7 @@ class SQLiteCoachlineRepository:
                 )
 
     @staticmethod
-    def _program_from_row(row: sqlite3.Row) -> Program:
+    def _program_from_row(row: Mapping[str, Any]) -> Program:
         values = dict(row)
         values["active"] = bool(values["active"])
         values["discipline"] = Discipline(values["discipline"])

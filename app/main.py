@@ -21,8 +21,8 @@ from pydantic import BaseModel
 from app.ai.config import OpenAISettings
 from app.ai.openai import OpenAIInterpreter
 from app.ai.ports import AIInterpreter
-from app.ai.repository import SQLiteAIRepository
-from app.database import Database
+from app.ai.repository import SQLAIRepository
+from app.database import Database, DatabaseBackend
 from app.messaging.config import TwilioSettings
 from app.messaging.models import (
     MessageProvider,
@@ -34,7 +34,7 @@ from app.messaging.models import (
 from app.messaging.repository import (
     MessagingConflictError,
     MessagingNotFoundError,
-    SQLiteMessagingRepository,
+    SQLMessagingRepository,
 )
 from app.messaging.service import MessagingService
 from app.messaging.twilio import (
@@ -50,15 +50,16 @@ from app.nutrition.models import (
     NutritionTarget,
     NutritionTargetCreate,
 )
-from app.nutrition.repository import SQLiteNutritionRepository
+from app.nutrition.repository import SQLNutritionRepository
 from app.nutrition.service import NutritionService
-from app.repository import ConflictError, NotFoundError, SQLiteCoachlineRepository
+from app.observability import install_request_observability
+from app.repository import ConflictError, NotFoundError, SQLCoachlineRepository
 from app.reminders.models import (
     ReminderRunResult,
     ReminderSettings,
     ReminderSettingsUpdate,
 )
-from app.reminders.repository import SQLiteReminderRepository
+from app.reminders.repository import SQLReminderRepository
 from app.reminders.service import ReminderService
 from app.schemas import (
     Prescription,
@@ -84,6 +85,11 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
 
 
+class ReadinessResponse(BaseModel):
+    status: Literal["ready"]
+    database_backend: DatabaseBackend
+
+
 def create_app(
     database_path: str | Path | None = None,
     *,
@@ -96,11 +102,13 @@ def create_app(
 ) -> FastAPI:
     """Create a Coachline application with an isolated persistence layer."""
 
-    path = database_path or os.getenv(
-        "COACHLINE_DATABASE_PATH", "data/coachline.sqlite3"
+    database_source = (
+        database_path
+        or os.getenv("COACHLINE_DATABASE_URL")
+        or os.getenv("COACHLINE_DATABASE_PATH", "data/coachline.sqlite3")
     )
-    database = Database(path)
-    service = CoachlineService(SQLiteCoachlineRepository(database))
+    database = Database(database_source)
+    service = CoachlineService(SQLCoachlineRepository(database))
     settings = twilio_settings or TwilioSettings.from_env()
     outbound_admin_token = admin_token or os.getenv("COACHLINE_ADMIN_TOKEN")
     adapter = twilio_adapter
@@ -112,20 +120,20 @@ def create_app(
         interpreter = OpenAIInterpreter(ai_settings)
     nutrition = NutritionService(
         service,
-        SQLiteNutritionRepository(database),
+        SQLNutritionRepository(database),
     )
     messaging = MessagingService(
         service,
-        SQLiteMessagingRepository(database),
+        SQLMessagingRepository(database),
         sender=adapter,
         interpreter=interpreter,
-        ai_repository=SQLiteAIRepository(database),
+        ai_repository=SQLAIRepository(database),
         nutrition=nutrition,
     )
     reminders = ReminderService(
         service,
         messaging,
-        SQLiteReminderRepository(database),
+        SQLReminderRepository(database),
     )
     clock = now_provider or (lambda: datetime.now(timezone.utc))
 
@@ -134,7 +142,9 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.8.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.9.0", lifespan=lifespan)
+    application.state.database = database
+    install_request_observability(application)
 
     def get_service() -> CoachlineService:
         return service
@@ -172,6 +182,28 @@ def create_app(
         """Report that the Coachline API process is available."""
 
         return HealthResponse(status="ok")
+
+    @application.get("/health/live", response_model=HealthResponse)
+    def liveness() -> HealthResponse:
+        return HealthResponse(status="ok")
+
+    @application.get(
+        "/health/ready",
+        response_model=ReadinessResponse,
+        responses={503: {"description": "Database unavailable"}},
+    )
+    def readiness() -> ReadinessResponse:
+        try:
+            database.ping()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Database is unavailable",
+            ) from exc
+        return ReadinessResponse(
+            status="ready",
+            database_backend=database.backend,
+        )
 
     @application.post(
         "/profiles", response_model=Profile, status_code=status.HTTP_201_CREATED

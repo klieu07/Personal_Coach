@@ -1,4 +1,4 @@
-"""SQLite persistence for reminder settings and idempotent jobs."""
+"""Portable SQL persistence for reminder settings and idempotent jobs."""
 
 from datetime import datetime
 from typing import Protocol
@@ -52,7 +52,7 @@ class ReminderRepository(Protocol):
     ) -> None: ...
 
 
-class SQLiteReminderRepository:
+class SQLReminderRepository:
     """Persist scheduler state so repeated runs do not duplicate reminders."""
 
     def __init__(self, database: Database) -> None:
@@ -93,7 +93,7 @@ class SQLiteReminderRepository:
                 """,
                 (
                     profile_id,
-                    values["enabled"],
+                    int(values["enabled"]),
                     values["reminder_time"],
                     values["quiet_hours_start"],
                     values["quiet_hours_end"],
@@ -184,7 +184,7 @@ class SQLiteReminderRepository:
                     )
                   )
                 """,
-                (now.isoformat(),),
+                (now,),
             )
         return cursor.rowcount
 
@@ -196,7 +196,7 @@ class SQLiteReminderRepository:
                 SET status = 'cancelled', updated_at = ?
                 WHERE session_id = ? AND status = 'pending'
                 """,
-                (now.isoformat(), session_id),
+                (now, session_id),
             )
         return cursor.rowcount
 
@@ -210,13 +210,13 @@ class SQLiteReminderRepository:
                 SET status = 'pending', next_attempt_at = ?, updated_at = ?
                 WHERE status = 'processing' AND updated_at < ?
                 """,
-                (now.isoformat(), now.isoformat(), stale_before.isoformat()),
+                (now.isoformat(), now, stale_before),
             )
         return cursor.rowcount
 
     def claim_due_job(self, now: datetime) -> ReminderJob | None:
         with self.database.session() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.acquire_reminder_claim_lock()
             row = connection.execute(
                 """
                 SELECT id, profile_id, session_id, scheduled_at,
@@ -238,7 +238,7 @@ class SQLiteReminderRepository:
                     updated_at = ?
                 WHERE id = ? AND status = 'pending'
                 """,
-                (now.isoformat(), row["id"]),
+                (now, row["id"]),
             )
         values = dict(row)
         values.update(
@@ -258,7 +258,7 @@ class SQLiteReminderRepository:
                     next_attempt_at = NULL, updated_at = ?
                 WHERE id = ? AND status = 'processing'
                 """,
-                (external_id, now.isoformat(), job_id),
+                (external_id, now, job_id),
             )
 
     def mark_cancelled(self, job_id: int, now: datetime) -> None:
@@ -269,7 +269,7 @@ class SQLiteReminderRepository:
                 SET status = 'cancelled', next_attempt_at = NULL, updated_at = ?
                 WHERE id = ? AND status = 'processing'
                 """,
-                (now.isoformat(), job_id),
+                (now, job_id),
             )
 
     def mark_delivery_failure(
@@ -293,7 +293,7 @@ class SQLiteReminderRepository:
                     status,
                     retry_at.isoformat() if retry_at else None,
                     error[:500],
-                    now.isoformat(),
+                    now,
                     job_id,
                 ),
             )

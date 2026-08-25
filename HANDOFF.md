@@ -4,41 +4,35 @@
 
 `/Users/klieu07/Personal Coach`
 
-## Completed through Phase 8
+## Completed through Phase 9
 
-- Structured lifting and running domain with SQLite persistence.
-- Provider-neutral messaging with secure Twilio webhooks and outbound SMS.
-- Strict AI interpretation contract and OpenAI Responses API adapter.
-- Configurable `gpt-5.6-luna` default with low reasoning.
-- Typed read, skip, completion, clarification, and reply intents.
-- Profile ownership and session-state validation after interpretation.
-- Fifteen-minute pending actions requiring explicit `YES` for mutations.
-- Deterministic cancellation and OpenAI-unavailable fallback.
-- Local interpretation audit and pending-action persistence.
-- Hashed, privacy-preserving OpenAI safety identifiers.
-- Opt-in profile reminder settings with local time and quiet hours.
-- Timezone-aware UTC scheduling for planned training sessions.
-- Durable one-job-per-session reminder idempotency.
-- Transactional job claims and interrupted-run recovery.
-- Session-state and settings-based pending-job cancellation.
-- Three-attempt delivery with bounded exponential backoff.
-- Admin-token-protected scheduler endpoint for cloud cron.
-- Delivery through the existing provider-neutral messaging service.
-- Effective-dated calorie and macro targets.
-- Structured meal creation, retrieval, replacement, and daily listing.
-- Timezone-aware local-day grouping with UTC timestamp storage.
-- Deterministic nutrition totals and remaining-target calculations.
-- Profile-scoped ownership checks for every nutrition record.
-- Explicit `user_supplied` and reserved `ai_estimate` provenance.
-- Authoritative user replacement of any estimated meal entry.
-- Deterministic `NUTRITION`, `MACROS`, and `CALORIES` SMS summaries.
-- Typed `show_nutrition` and `log_meal_estimate` AI intents.
-- Strict nested meal-estimate structured output with timezone validation.
-- Fifteen-minute confirmation requirement before estimate persistence.
-- Timestamp range checks at proposal and execution time.
-- Confirmed estimates stored with visible `ai_estimate` provenance.
-- Cancellation and duplicate-confirmation protection for meal estimates.
-- Fake-provider tests; no real OpenAI or Twilio request was sent.
+Phases 0–8 provide the FastAPI foundation, structured lifting and running,
+provider-neutral Twilio messaging, validated OpenAI interpretation with
+confirmation boundaries, proactive reminders, and the deterministic nutrition
+ledger with clearly labeled AI estimates.
+
+Phase 9 adds the production operations foundation:
+
+- one portable database interface for SQLite and PostgreSQL;
+- SQLite as the no-service local development default;
+- PostgreSQL selected through `COACHLINE_DATABASE_URL`;
+- native PostgreSQL migrations for all six existing schema versions;
+- transaction-scoped PostgreSQL advisory locking for concurrent migrations;
+- portable repositories using `RETURNING id` and backend-neutral conflicts;
+- serialized PostgreSQL reminder claiming across application instances;
+- backward-compatible `/health`, process `/health/live`, and database-aware
+  `/health/ready` routes;
+- sanitized readiness failures that do not expose database connection data;
+- validated request IDs and privacy-safe structured JSON access logs;
+- `PORT`-aware application startup through `python -m app`;
+- a non-root production container with a readiness health check;
+- environment templates for local SQLite and production PostgreSQL; and
+- deployment, secrets, scheduler, backup, restore, and rollback guidance in
+  `OPERATIONS.md`.
+
+No real SMS, OpenAI request, or external PostgreSQL connection is made by the
+automated test suite. No personal phone number or credential is stored in the
+repository.
 
 ## Verification
 
@@ -49,39 +43,42 @@ Run from the repository root:
 .venv/bin/python -m compileall -q app tests
 ```
 
-Current Phase 8 result: 33 tests pass. The only warning is the existing
-third-party Starlette test-client deprecation warning on Python 3.14.
+The Phase 9 suite has 38 tests. The only expected warning is a third-party
+Starlette test-client deprecation warning on Python 3.14.
 
-## OpenAI configuration
+PostgreSQL behavior is covered at the adapter and migration boundary with a
+fake Psycopg connection. The first cloud deployment must also run a staging
+smoke test against the selected managed PostgreSQL service.
 
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL` (default `gpt-5.6-luna`)
-- `OPENAI_REASONING_EFFORT` (default `low`)
+## Production configuration
 
-Requests use strict JSON Schema output, `store=False`, and a hashed internal
-profile identifier for `safety_identifier`.
+- `COACHLINE_DATABASE_URL` for managed PostgreSQL.
+- `COACHLINE_ADMIN_TOKEN` for scheduler and outbound-admin operations.
+- Twilio credentials and the exact webhook URL.
+- `OPENAI_API_KEY` when AI interpretation is enabled.
+- `PORT` and `COACHLINE_LOG_LEVEL` as non-secret runtime settings.
+
+Production secrets belong in the hosting platform's secret manager. Local
+`.env`, credentials, database dumps, and personal phone numbers must remain
+untracked.
 
 ## Important rules
 
-- AI output is untrusted until Pydantic and domain validation pass.
-- The AI adapter can propose actions but never execute them.
-- `skip_session` and `record_result` require a separate confirmation message.
-- Session ownership must be checked after every interpreted reference.
-- Deterministic commands must not depend on OpenAI availability.
-- Reminders are opt-in and saving settings must not trigger delivery.
-- Only the authenticated scheduler endpoint may run proactive delivery.
-- Reminder jobs must stay unique by training session.
-- Scheduler retries must not reopen sent or permanently failed jobs.
-- Public nutrition writes must always be marked `user_supplied`.
-- Nutrition totals must remain deterministic and independent of AI.
-- Future estimates must be labeled and cannot silently replace user values.
-- Meal estimates require a separate confirmation message before persistence.
-- Estimate timestamp and provenance must be revalidated during confirmation.
-- Nutrition summary commands must not depend on OpenAI availability.
-- Real credentials and personal phone numbers must stay out of tracked files.
+- AI output remains untrusted until schema, ownership, and state validation.
+- AI proposes mutations but cannot execute them without explicit confirmation.
+- Deterministic commands must work without OpenAI.
+- Reminder delivery stays opt-in, idempotent, and scheduler-authenticated.
+- Public nutrition writes remain `user_supplied`; estimates remain visible.
+- Migration versions are forward-only and must never be edited after release.
+- SQLite and PostgreSQL must preserve the same domain behavior.
+- Readiness and logs must never expose credentials, bodies, queries, or contact
+  addresses.
+- Files under `sources/` are synced read-only references and must not be
+  changed, moved, or deleted.
 
 ## Recommended next phase
 
-Phase 9 can add a PostgreSQL persistence adapter and production cloud
-operations while preserving SQLite for local development. It should include
-managed secrets, scheduled reminder invocation, backups, and observability.
+Phase 10 should select a cloud provider, deploy the Phase 9 artifact, provision
+managed PostgreSQL and a scheduled reminder trigger, install secrets, and run
+staging end-to-end checks. It requires explicit platform selection and account
+authorization; those are intentionally not inferred from this phase.
