@@ -25,8 +25,9 @@ the Blueprint plan before selecting **Deploy Blueprint**.
 3. Connect `klieu07/Personal_Coach` and select its `main` branch.
 4. Keep the default Blueprint path, `render.yaml`.
 5. Review all three resources and the displayed price.
-6. Supply the Twilio values and, if AI interpretation is wanted, the OpenAI
-   key when Render prompts for variables marked `sync: false`.
+6. Supply the Twilio Account SID and Auth Token and, if AI interpretation is
+   wanted, the OpenAI key when Render prompts for variables marked
+   `sync: false`. A Twilio sending number is deliberately added later.
 7. Select **Deploy Blueprint** and wait for `coachline-api` to become healthy.
 
 Render generates `COACHLINE_ADMIN_TOKEN`; do not replace it with a token stored
@@ -52,17 +53,20 @@ for every count to be zero.
 
 ## Connect Twilio after the URL exists
 
-1. In the `coachline-api` environment settings, add
-   `TWILIO_WEBHOOK_URL` with the exact value:
+1. Obtain and verify an SMS-capable Twilio number. Until then, Coachline can be
+   deployed and health-checked, but it cannot send or receive SMS.
+2. In the `coachline-api` environment settings, add `TWILIO_FROM_NUMBER` with
+   that Twilio number in E.164 form, such as `+15551234567`.
+3. Add `TWILIO_WEBHOOK_URL` with the exact value:
 
    ```text
    https://<actual-service-host>/webhooks/twilio/sms
    ```
 
-2. Save the environment change and wait for the redeploy to become healthy.
-3. Configure the same URL as the Twilio number's incoming-message webhook,
+4. Save the environment changes and wait for the redeploy to become healthy.
+5. Configure the same URL as the Twilio number's incoming-message webhook,
    using HTTP `POST`.
-4. Run a health smoke test again before sending an SMS.
+6. Run a health smoke test again before sending an SMS.
 
 Do not add a personal phone number to Render variables. Phone addresses belong
 in Coachline's database through the messaging-contact API.

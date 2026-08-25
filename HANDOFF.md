@@ -19,7 +19,8 @@ Phase 10 selects Render and adds a reproducible deployment package:
 - the API receives Render's internal database connection string;
 - the cron receives the API's private address and generated admin token through
   service references;
-- Twilio and OpenAI credentials use `sync: false` and never enter Git;
+- the Twilio Account SID/Auth Token and OpenAI key use `sync: false` and never
+  enter Git;
 - GitHub Actions runs tests and compilation with Python 3.12;
 - both Render services wait for CI checks before deploying;
 - `python -m app.commands.run_reminders` performs one authenticated internal
@@ -57,7 +58,8 @@ Follow `RENDER_DEPLOYMENT.md` after committing and pushing:
 
 1. Connect `klieu07/Personal_Coach` in **New > Blueprint** on Render.
 2. Review current pricing for all three resources.
-3. Supply Twilio values and the optional OpenAI key.
+3. Supply the Twilio Account SID/Auth Token and optional OpenAI key. Add the
+   Twilio sending number only after it is obtained and verified.
 4. Deploy and wait for PostgreSQL readiness.
 5. Run the read-only smoke test.
 6. Set the exact Twilio webhook URL, then test `TODAY` before mutations.

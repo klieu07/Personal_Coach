@@ -140,5 +140,6 @@ def test_render_blueprint_has_private_database_and_no_secrets() -> None:
     assert "property: connectionString" in blueprint
     assert "ipAllowList: []" in blueprint
     assert "generateValue: true" in blueprint
+    assert "TWILIO_FROM_NUMBER" not in blueprint
     assert "private-admin-token" not in blueprint
     assert "+1626" not in blueprint.replace(" ", "")
