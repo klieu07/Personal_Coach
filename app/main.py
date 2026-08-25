@@ -18,6 +18,10 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
+from app.ai.config import OpenAISettings
+from app.ai.openai import OpenAIInterpreter
+from app.ai.ports import AIInterpreter
+from app.ai.repository import SQLiteAIRepository
 from app.database import Database
 from app.messaging.config import TwilioSettings
 from app.messaging.models import (
@@ -69,6 +73,8 @@ def create_app(
     *,
     twilio_settings: TwilioSettings | None = None,
     twilio_adapter: TwilioAdapter | None = None,
+    openai_settings: OpenAISettings | None = None,
+    ai_interpreter: AIInterpreter | None = None,
     admin_token: str | None = None,
 ) -> FastAPI:
     """Create a Coachline application with an isolated persistence layer."""
@@ -83,8 +89,16 @@ def create_app(
     adapter = twilio_adapter
     if adapter is None and settings.can_validate_webhooks:
         adapter = TwilioAdapter(settings)
+    ai_settings = openai_settings or OpenAISettings.from_env()
+    interpreter = ai_interpreter
+    if interpreter is None and ai_settings.enabled:
+        interpreter = OpenAIInterpreter(ai_settings)
     messaging = MessagingService(
-        service, SQLiteMessagingRepository(database), sender=adapter
+        service,
+        SQLiteMessagingRepository(database),
+        sender=adapter,
+        interpreter=interpreter,
+        ai_repository=SQLiteAIRepository(database),
     )
 
     @asynccontextmanager
@@ -92,7 +106,7 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.4.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.5.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service

@@ -52,6 +52,15 @@ class CoachlineService:
     def get_session(self, session_id: int) -> TrainingSession:
         return self.repository.get_session(session_id)
 
+    def get_session_for_profile(
+        self, profile_id: int, session_id: int
+    ) -> TrainingSession:
+        session = self.repository.get_session(session_id)
+        program = self.repository.get_program(session.program_id)
+        if program.profile_id != profile_id:
+            raise NotFoundError(f"Session {session_id} was not found")
+        return session
+
     def list_sessions(
         self, profile_id: int, status: SessionStatus | None = None
     ) -> list[TrainingSession]:

@@ -1,103 +1,115 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 4
-connects its structured training workflows to SMS through a provider-neutral
-messaging layer and a secure Twilio adapter.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 5
+adds typed AI interpretation to the secure SMS and training foundations built
+in Phases 0–4.
 
-## Current scope: Phase 4
+## Current scope: Phase 5
 
 Coachline can now:
 
-- link a profile to a Twilio SMS phone number;
-- validate inbound Twilio webhooks using the official SDK and every received
-  form parameter;
-- normalize provider webhooks into Coachline message models;
-- return valid TwiML replies;
-- answer the deterministic `TODAY` command from stored training data;
-- make webhook retries idempotent using Twilio's message SID;
-- queue outbound SMS through a provider interface;
-- protect manual outbound sends with a separate admin token; and
-- retain inbound messages, replies, and outbound message status in SQLite.
+- interpret free-form SMS through an AI-provider contract;
+- use OpenAI's Responses API with a strict JSON schema;
+- recognize `show_today`, `skip_session`, `record_result`, `clarify`, and
+  conversational `reply` intents;
+- execute read-only intents immediately;
+- require an explicit `YES` before any AI-proposed training mutation;
+- cancel a pending action with `NO`;
+- expire pending actions after 15 minutes;
+- verify that a referenced session belongs to the linked profile;
+- preserve deterministic commands when OpenAI is unavailable;
+- audit interpretations locally without storing an API key; and
+- reject malformed or out-of-scope model output before it reaches domain code.
 
-No real SMS is sent during tests. A fake Twilio client verifies the adapter
-boundary.
+Phase 5 uses `gpt-5.6-luna` with low reasoning by default because SMS intent
+classification is latency-sensitive and high volume. Both values are
+configuration settings rather than hard application dependencies.
 
-OpenAI interpretation, free-form coaching, nutrition, reminders, delivery
-status callbacks, and cloud deployment remain outside this phase.
+The implementation follows the official OpenAI documentation for the
+[Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create)
+and [current model guidance](https://developers.openai.com/api/docs/guides/latest-model).
 
-## How this supports the final design
+## Safety and approval boundary
 
-Twilio is a transport adapter, not the owner of Coachline behavior:
+The model never writes directly to Coachline. It returns one strict object:
 
-```text
-Twilio webhook                    Future BlueBubbles adapter
-       |                                    |
-       +---------- normalized messages -----+
-                            |
-                  messaging workflows
-                            |
-                   Coachline services
-                            |
-          SQLite now / PostgreSQL later
+```json
+{
+  "intent": "skip_session",
+  "session_id": 12,
+  "summary": null,
+  "reply_text": null
+}
 ```
 
-The normalized messaging service handles contacts, idempotency, command
-routing, and message history. The Twilio adapter alone knows about Twilio form
-parameters, `X-Twilio-Signature`, TwiML, and the Messages API. A future
-BlueBubbles adapter can therefore reuse training and message-routing behavior.
-
-## Supported SMS behavior
-
-A linked user can send any of these commands:
+Coachline then validates the object, profile ownership, current session state,
+and supported action. A state-changing request becomes a pending local action:
 
 ```text
-TODAY
-WORKOUT
-TODAY'S WORKOUT
+User: I need to skip session 12.
+Coachline: Confirm skipping session 12, Easy run, scheduled for 2026-09-01?
+           Reply YES or NO.
+User: YES
+Coachline: Skipped Easy run on 2026-09-01.
 ```
 
-Coachline replies with today's planned sessions and their structured lifting
-or running prescription. Other messages receive a safe acknowledgement that
-free-form AI coaching is not enabled yet. Unlinked phone numbers receive
-linking instructions and cannot access profile data.
+Until `YES` arrives, no training data changes. A Twilio retry with the same
+message SID returns the stored response and does not execute twice.
 
-## Twilio security
+## AI privacy and availability
 
-The webhook verifies `X-Twilio-Signature` with Twilio's official
-`RequestValidator`. Validation uses every received form field and the exact
-public webhook URL configured in `TWILIO_WEBHOOK_URL`. Invalid signatures
-receive HTTP 403 before message processing.
+- `OPENAI_API_KEY` is read only from the process environment.
+- Responses requests set `store=False`.
+- Coachline sends a SHA-256 hash of its internal profile ID as the stable
+  `safety_identifier`; it does not use the linked phone number as that ID.
+- The training context contains session IDs, dates, titles, and states needed
+  to select an action. It does not include the contact address or profile name.
+- The user's message text is sent for interpretation and may itself contain
+  information the user typed.
+- If OpenAI is unconfigured or unavailable, `TODAY`, `YES`, `NO`, and other
+  deterministic routing continue to work where applicable.
 
-The manual outbound endpoint additionally requires
-`X-Coachline-Admin-Token`. This prevents a public caller from creating paid
-Twilio sends merely by knowing a profile ID.
+No OpenAI request or real SMS is made by the automated test suite.
 
-See Twilio's official documentation for [incoming message
-webhooks](https://www.twilio.com/docs/messaging/guides/webhook-request),
-[webhook security](https://www.twilio.com/docs/usage/webhooks/webhooks-security),
-and the [Messages API](https://www.twilio.com/docs/messaging/api/message-resource).
+## Final architecture direction
+
+```text
+Twilio / future BlueBubbles
+            |
+provider-neutral messaging and idempotency
+            |
+deterministic router ---- AI interpreter
+            |                  |
+            +---- typed intent-+
+                      |
+        validation and confirmation
+                      |
+             Coachline services
+                      |
+          SQLite / future PostgreSQL
+```
+
+AI interpretation is replaceable. Training state, ownership, approval, and
+progression remain ordinary application code.
 
 ## Configuration
 
-Create a local environment file:
+Create a local environment file and keep it untracked:
 
 ```bash
 cp .env.example .env
 ```
 
-Set these values:
+The Phase 5 settings are:
 
 ```dotenv
-COACHLINE_DATABASE_PATH=data/coachline.sqlite3
-COACHLINE_ADMIN_TOKEN=use-a-long-random-value
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=your-primary-auth-token
-TWILIO_FROM_NUMBER=+15555550100
-TWILIO_WEBHOOK_URL=https://your-public-host/webhooks/twilio/sms
+OPENAI_API_KEY=replace-with-project-api-key
+OPENAI_MODEL=gpt-5.6-luna
+OPENAI_REASONING_EFFORT=low
 ```
 
-Do not commit `.env`. Coachline reads process environment variables, so load
-the file before starting locally:
+Twilio still requires its Phase 4 values, including the exact public webhook
+URL. Load the environment before running locally:
 
 ```bash
 set -a
@@ -105,39 +117,46 @@ source .env
 set +a
 ```
 
-Configure the Twilio phone number's incoming-message webhook to use the exact
-`TWILIO_WEBHOOK_URL` value with HTTP `POST`. For local development, that URL
-must be an HTTPS tunnel or another public address that reaches Coachline.
+Never commit `.env` or insert real API keys, auth tokens, or personal phone
+numbers into tests and documentation.
+
+## Supported messaging behavior
+
+Deterministic messages:
+
+- `TODAY`, `WORKOUT`, or `TODAY'S WORKOUT`
+- `YES`, `Y`, or `CONFIRM`
+- `NO`, `N`, or `CANCEL`
+
+With OpenAI configured, free-form text can additionally propose:
+
+- showing today's workout;
+- skipping one known session;
+- recording a summary result for one known session;
+- a clarification question; or
+- a non-mutating conversational reply.
+
+Structured lifting-set and running-metric entry remain available through the
+API. Phase 5's SMS completion intent records the factual summary supplied by
+the user.
 
 ## API
 
-The Phase 0–3 profile, program, session, prescription, result, and progression
-endpoints remain available. Phase 4 adds:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/profiles/{profile_id}/messaging-contacts` | Link an E.164 address |
-| `GET` | `/profiles/{profile_id}/messaging-contacts/{provider}` | Retrieve a contact |
-| `POST` | `/profiles/{profile_id}/messages` | Send an admin-authorized message |
-| `POST` | `/webhooks/twilio/sms` | Receive a signed Twilio SMS webhook |
+The Phase 0–4 health, training, contact, outbound-message, and signed Twilio
+webhook endpoints remain available. AI interpretation is internal to the
+messaging workflow, so no endpoint can bypass confirmation by submitting a
+model-generated action directly.
 
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
 while the server is running.
 
 ## Run locally
 
-Create and activate a virtual environment, then install the project:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
-```
-
-Start the API after loading any environment file:
-
-```bash
 uvicorn app.main:app --reload
 ```
 
@@ -150,9 +169,10 @@ that has not already run.
 pytest
 ```
 
-Tests cover prior training behavior plus signature rejection and acceptance,
-all-parameter validation, linked and unlinked senders, retry idempotency,
-contact conflicts, mocked outbound SMS, and missing configuration.
+Tests use fake OpenAI and Twilio clients. They cover strict request shape,
+malformed model output, deterministic fallback, confirmation and cancellation,
+duplicate webhook delivery, local audit state, completed-result recording, and
+cross-profile isolation.
 
 ## Run with Docker
 
@@ -165,7 +185,6 @@ For durable Docker data, mount `/app/data` as a volume.
 
 ## Next architectural step
 
-Phase 5 should add an AI interpretation boundary that converts free-form text
-into typed, reviewable Coachline commands. AI output must be validated before
-it can modify training state, and deterministic commands such as `TODAY` should
-continue to work without an AI provider.
+Phase 6 should add proactive reminder scheduling and delivery. It should query
+planned session state, create idempotent reminder jobs, respect the profile's
+timezone and quiet hours, and use the existing provider-neutral sender.
