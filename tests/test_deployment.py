@@ -138,6 +138,7 @@ def test_render_blueprint_has_private_database_and_no_secrets() -> None:
     assert blueprint.count("plan: free") == 2
     assert "coachline-reminders" not in blueprint
     assert "type: cron" not in blueprint
+    assert "maxShutdownDelaySeconds" not in blueprint
     assert "property: connectionString" in blueprint
     assert "ipAllowList: []" in blueprint
     assert "generateValue: true" in blueprint
