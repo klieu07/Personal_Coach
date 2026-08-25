@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pip-cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Local configuration and databases
+.env
+*.db
+*.sqlite
+*.sqlite3
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,1 @@
+"""Coachline application package."""
