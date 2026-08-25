@@ -289,5 +289,6 @@ def test_phase2_database_is_upgraded_in_place(tmp_path: Path) -> None:
         "003_messaging",
         "004_ai_interpretation",
         "005_proactive_reminders",
+        "006_nutrition_ledger",
     ]
     assert structured_table is not None

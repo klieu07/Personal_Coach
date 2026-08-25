@@ -4,7 +4,7 @@
 
 `/Users/klieu07/Personal Coach`
 
-## Completed through Phase 6
+## Completed through Phase 7
 
 - Structured lifting and running domain with SQLite persistence.
 - Provider-neutral messaging with secure Twilio webhooks and outbound SMS.
@@ -24,6 +24,13 @@
 - Three-attempt delivery with bounded exponential backoff.
 - Admin-token-protected scheduler endpoint for cloud cron.
 - Delivery through the existing provider-neutral messaging service.
+- Effective-dated calorie and macro targets.
+- Structured meal creation, retrieval, replacement, and daily listing.
+- Timezone-aware local-day grouping with UTC timestamp storage.
+- Deterministic nutrition totals and remaining-target calculations.
+- Profile-scoped ownership checks for every nutrition record.
+- Explicit `user_supplied` and reserved `ai_estimate` provenance.
+- Authoritative user replacement of any estimated meal entry.
 - Fake-provider tests; no real OpenAI or Twilio request was sent.
 
 ## Verification
@@ -34,6 +41,9 @@ Run from the repository root:
 .venv/bin/pytest
 .venv/bin/python -m compileall -q app tests
 ```
+
+Current Phase 7 result: 27 tests pass. The only warning is the existing
+third-party Starlette test-client deprecation warning on Python 3.14.
 
 ## OpenAI configuration
 
@@ -55,9 +65,13 @@ profile identifier for `safety_identifier`.
 - Only the authenticated scheduler endpoint may run proactive delivery.
 - Reminder jobs must stay unique by training session.
 - Scheduler retries must not reopen sent or permanently failed jobs.
+- Public nutrition writes must always be marked `user_supplied`.
+- Nutrition totals must remain deterministic and independent of AI.
+- Future estimates must be labeled and cannot silently replace user values.
 - Real credentials and personal phone numbers must stay out of tracked files.
 
 ## Recommended next phase
 
-Phase 7 can add structured nutrition targets and meal logging. Explicit values
-entered by the user should override any future AI-derived estimate.
+Phase 8 can add deterministic nutrition summaries and confirmed, provenance-
+aware meal interpretation to messaging. AI estimates must remain visibly
+estimated until explicitly accepted or replaced by the user.

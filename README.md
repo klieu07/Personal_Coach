@@ -1,29 +1,70 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 6
-adds proactive workout reminders to the training, secure SMS, and validated AI
-foundations built in Phases 0–5.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 7
+adds a factual nutrition ledger to the training, secure SMS, validated AI, and
+proactive reminder foundations built in Phases 0–6.
 
-## Current scope: Phase 6
+## Current scope: Phase 7
 
 Coachline can now:
 
-- opt profiles into proactive reminders with a chosen local time;
-- schedule from the profile's validated IANA timezone;
-- defer reminder delivery until configured quiet hours end;
-- create one durable reminder job per planned session;
-- cancel pending jobs when sessions are completed, skipped, or reminders are
-  disabled;
-- claim due jobs transactionally so overlapping scheduler runs do not deliver
-  the same completed job twice;
-- retry temporary delivery failures with bounded exponential backoff;
-- recover jobs abandoned by an interrupted scheduler run;
-- deliver through the existing provider-neutral messaging service; and
-- run safely from cloud cron through an admin-token-protected endpoint.
+- set effective-dated calorie, protein, carbohydrate, fat, and fiber targets;
+- replace a target for one effective date without duplicating it;
+- select the latest target effective on a requested date;
+- record and replace structured meal entries;
+- require timezone-aware meal timestamps and normalize storage to UTC;
+- group meals by the profile's local calendar day, including across UTC date
+  boundaries;
+- calculate deterministic daily totals and remaining target amounts;
+- isolate every meal and target by profile ownership; and
+- label nutrition provenance as `user_supplied` or `ai_estimate` while ensuring
+  every explicit API entry or replacement becomes `user_supplied`.
 
-Reminder settings default to disabled. Saving settings or creating a workout
-never sends a message; the authenticated scheduler run is the only proactive
-delivery trigger.
+Phase 7 does not estimate nutrition with AI. It establishes the factual record
+that later interpretation can propose changes to without silently replacing
+values entered by the user.
+
+## Nutrition ledger and provenance
+
+Targets are effective-dated, so a future target does not change earlier daily
+summaries. Meals store total calories and macros for the entry, an aware
+`eaten_at` timestamp, optional notes, and a provenance label.
+
+The public meal endpoints always write `user_supplied`. The schema reserves
+`ai_estimate` for a future estimation workflow, but an explicit replacement of
+that entry changes the source to `user_supplied`. Daily arithmetic is ordinary
+application code and does not depend on a model.
+
+```http
+PUT /profiles/1/nutrition-targets/2026-09-01
+Content-Type: application/json
+
+{
+  "calories_kcal": 2200,
+  "protein_g": 160,
+  "carbohydrates_g": 240,
+  "fat_g": 70,
+  "fiber_g": 30
+}
+```
+
+```http
+POST /profiles/1/meals
+Content-Type: application/json
+
+{
+  "name": "Breakfast",
+  "eaten_at": "2026-09-01T08:00:00-07:00",
+  "calories_kcal": 520,
+  "protein_g": 35,
+  "carbohydrates_g": 62,
+  "fat_g": 16,
+  "fiber_g": 8
+}
+```
+
+`GET /profiles/1/nutrition/daily?on=2026-09-01` returns the target, totals,
+remaining amounts, and meals for that local day.
 
 ## Safety and approval boundary
 
@@ -96,6 +137,8 @@ deterministic router -------- AI interpreter
                      + typed intent +
                              |
                  validation and confirmation
+                             |
+             training + nutrition services
                              |
                   SQLite / future PostgreSQL
 ```
@@ -183,10 +226,9 @@ the user.
 ## API
 
 The earlier health, training, contact, outbound-message, signed Twilio webhook,
-and validated AI workflows remain available. Phase 6 adds profile reminder
-settings and the authenticated scheduler route. AI interpretation is internal
-to messaging, so no endpoint can bypass confirmation by submitting a
-model-generated action directly.
+validated AI, and proactive reminder workflows remain available. Phase 7 adds
+effective-dated target, meal, and daily nutrition-summary endpoints. Nutrition
+input is currently API-only and does not expand the model's allowed actions.
 
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
 while the server is running.
@@ -217,6 +259,10 @@ cross-profile isolation. Reminder tests additionally cover opt-in defaults,
 quiet-hour deferral, timezone conversion, idempotent scheduler runs, state
 cancellation, authentication, and delivery retry backoff.
 
+Nutrition tests cover effective target selection, idempotent target replacement,
+timezone-aware daily grouping, totals and balances, profile isolation, input
+validation, provenance labeling, and authoritative user replacement.
+
 ## Run with Docker
 
 ```bash
@@ -228,7 +274,7 @@ For durable Docker data, mount `/app/data` as a volume.
 
 ## Next architectural step
 
-Phase 7 can add a structured nutrition ledger, daily targets, and meal entry.
-User-supplied nutrition values should remain authoritative, with any future AI
-estimate clearly labeled and replaceable rather than silently overwriting
-factual entries.
+Phase 8 can expose nutrition through messaging. Deterministic daily-summary
+commands should work without AI; free-form meal interpretation may propose a
+clearly labeled estimate, but saving it should require confirmation and must
+never overwrite a `user_supplied` value without an explicit replacement.

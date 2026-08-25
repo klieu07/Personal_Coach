@@ -43,6 +43,15 @@ from app.messaging.twilio import (
     MessagingNotConfiguredError,
     TwilioAdapter,
 )
+from app.nutrition.models import (
+    DailyNutritionSummary,
+    MealEntry,
+    MealEntryCreate,
+    NutritionTarget,
+    NutritionTargetCreate,
+)
+from app.nutrition.repository import SQLiteNutritionRepository
+from app.nutrition.service import NutritionService
 from app.repository import ConflictError, NotFoundError, SQLiteCoachlineRepository
 from app.reminders.models import (
     ReminderRunResult,
@@ -113,6 +122,10 @@ def create_app(
         messaging,
         SQLiteReminderRepository(database),
     )
+    nutrition = NutritionService(
+        service,
+        SQLiteNutritionRepository(database),
+    )
     clock = now_provider or (lambda: datetime.now(timezone.utc))
 
     @asynccontextmanager
@@ -120,7 +133,7 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.6.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.7.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service
@@ -136,6 +149,11 @@ def create_app(
         return reminders
 
     Reminders = Annotated[ReminderService, Depends(get_reminders)]
+
+    def get_nutrition() -> NutritionService:
+        return nutrition
+
+    Nutrition = Annotated[NutritionService, Depends(get_nutrition)]
 
     def require_admin_token(supplied_admin_token: str | None) -> None:
         if not outbound_admin_token:
@@ -180,6 +198,111 @@ def create_app(
     def list_programs(profile_id: int, coachline: Service) -> list[Program]:
         try:
             return coachline.list_programs(profile_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.put(
+        "/profiles/{profile_id}/nutrition-targets/{effective_from}",
+        response_model=NutritionTarget,
+    )
+    def set_nutrition_target(
+        profile_id: int,
+        effective_from: date,
+        payload: NutritionTargetCreate,
+        nutrition_service: Nutrition,
+    ) -> NutritionTarget:
+        try:
+            return nutrition_service.set_target(
+                profile_id, effective_from, payload
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/nutrition-targets",
+        response_model=NutritionTarget | None,
+    )
+    def get_nutrition_target(
+        profile_id: int,
+        nutrition_service: Nutrition,
+        on_date: Annotated[date | None, Query(alias="on")] = None,
+    ) -> NutritionTarget | None:
+        try:
+            return nutrition_service.get_target(profile_id, on_date)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.post(
+        "/profiles/{profile_id}/meals",
+        response_model=MealEntry,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_meal(
+        profile_id: int,
+        payload: MealEntryCreate,
+        nutrition_service: Nutrition,
+    ) -> MealEntry:
+        try:
+            return nutrition_service.create_meal(profile_id, payload)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/meals",
+        response_model=list[MealEntry],
+    )
+    def list_meals(
+        profile_id: int,
+        nutrition_service: Nutrition,
+        on_date: Annotated[date | None, Query(alias="on")] = None,
+    ) -> list[MealEntry]:
+        try:
+            return nutrition_service.list_meals(profile_id, on_date)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/meals/{meal_id}",
+        response_model=MealEntry,
+    )
+    def get_meal(
+        profile_id: int,
+        meal_id: int,
+        nutrition_service: Nutrition,
+    ) -> MealEntry:
+        try:
+            return nutrition_service.get_meal(profile_id, meal_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.put(
+        "/profiles/{profile_id}/meals/{meal_id}",
+        response_model=MealEntry,
+    )
+    def replace_meal(
+        profile_id: int,
+        meal_id: int,
+        payload: MealEntryCreate,
+        nutrition_service: Nutrition,
+    ) -> MealEntry:
+        try:
+            return nutrition_service.replace_meal(
+                profile_id, meal_id, payload
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/nutrition/daily",
+        response_model=DailyNutritionSummary,
+    )
+    def daily_nutrition_summary(
+        profile_id: int,
+        nutrition_service: Nutrition,
+        on_date: Annotated[date | None, Query(alias="on")] = None,
+    ) -> DailyNutritionSummary:
+        try:
+            return nutrition_service.daily_summary(profile_id, on_date)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
