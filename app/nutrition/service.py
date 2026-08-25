@@ -52,6 +52,14 @@ class NutritionService:
             profile_id, payload, NutritionValueSource.USER_SUPPLIED
         )
 
+    def create_estimated_meal(
+        self, profile_id: int, payload: MealEntryCreate
+    ) -> MealEntry:
+        self.coachline.get_profile(profile_id)
+        return self.repository.create_meal(
+            profile_id, payload, NutritionValueSource.AI_ESTIMATE
+        )
+
     def get_meal(self, profile_id: int, meal_id: int) -> MealEntry:
         self.coachline.get_profile(profile_id)
         return self.repository.get_meal(profile_id, meal_id)

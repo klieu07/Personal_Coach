@@ -4,7 +4,7 @@
 
 `/Users/klieu07/Personal Coach`
 
-## Completed through Phase 7
+## Completed through Phase 8
 
 - Structured lifting and running domain with SQLite persistence.
 - Provider-neutral messaging with secure Twilio webhooks and outbound SMS.
@@ -31,6 +31,13 @@
 - Profile-scoped ownership checks for every nutrition record.
 - Explicit `user_supplied` and reserved `ai_estimate` provenance.
 - Authoritative user replacement of any estimated meal entry.
+- Deterministic `NUTRITION`, `MACROS`, and `CALORIES` SMS summaries.
+- Typed `show_nutrition` and `log_meal_estimate` AI intents.
+- Strict nested meal-estimate structured output with timezone validation.
+- Fifteen-minute confirmation requirement before estimate persistence.
+- Timestamp range checks at proposal and execution time.
+- Confirmed estimates stored with visible `ai_estimate` provenance.
+- Cancellation and duplicate-confirmation protection for meal estimates.
 - Fake-provider tests; no real OpenAI or Twilio request was sent.
 
 ## Verification
@@ -42,7 +49,7 @@ Run from the repository root:
 .venv/bin/python -m compileall -q app tests
 ```
 
-Current Phase 7 result: 27 tests pass. The only warning is the existing
+Current Phase 8 result: 33 tests pass. The only warning is the existing
 third-party Starlette test-client deprecation warning on Python 3.14.
 
 ## OpenAI configuration
@@ -68,10 +75,13 @@ profile identifier for `safety_identifier`.
 - Public nutrition writes must always be marked `user_supplied`.
 - Nutrition totals must remain deterministic and independent of AI.
 - Future estimates must be labeled and cannot silently replace user values.
+- Meal estimates require a separate confirmation message before persistence.
+- Estimate timestamp and provenance must be revalidated during confirmation.
+- Nutrition summary commands must not depend on OpenAI availability.
 - Real credentials and personal phone numbers must stay out of tracked files.
 
 ## Recommended next phase
 
-Phase 8 can add deterministic nutrition summaries and confirmed, provenance-
-aware meal interpretation to messaging. AI estimates must remain visibly
-estimated until explicitly accepted or replaced by the user.
+Phase 9 can add a PostgreSQL persistence adapter and production cloud
+operations while preserving SQLite for local development. It should include
+managed secrets, scheduled reminder invocation, backups, and observability.

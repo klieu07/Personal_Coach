@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.ai.config import OpenAISettings
 from app.ai.models import (
+    AIMealEstimate,
     AIIntent,
     AIInterpretation,
     AIInterpretationResult,
@@ -69,6 +70,7 @@ def result(
     session_id: int | None = None,
     summary: str | None = None,
     reply_text: str | None = None,
+    meal: AIMealEstimate | None = None,
 ) -> AIInterpretationResult:
     return AIInterpretationResult(
         interpretation=AIInterpretation(
@@ -76,6 +78,7 @@ def result(
             session_id=session_id,
             summary=summary,
             reply_text=reply_text,
+            meal=meal,
         ),
         response_id="resp_fake",
         model="fake-model",
@@ -161,6 +164,7 @@ def test_openai_adapter_requests_strict_non_stored_output() -> None:
             "session_id": 7,
             "summary": None,
             "reply_text": None,
+            "meal": None,
         }
     )
     adapter = OpenAIInterpreter(
@@ -181,7 +185,37 @@ def test_openai_adapter_requests_strict_non_stored_output() -> None:
     assert request["store"] is False
     assert request["safety_identifier"] == "a" * 64
     assert request["text"]["format"]["strict"] is True
-    assert request["text"]["format"]["schema"]["additionalProperties"] is False
+    schema = request["text"]["format"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert "meal" in schema["required"]
+    assert schema["$defs"]["AIMealEstimate"]["additionalProperties"] is False
+
+
+def test_openai_adapter_rejects_invalid_meal_estimate() -> None:
+    fake_client = FakeOpenAIClient(
+        {
+            "intent": "log_meal_estimate",
+            "session_id": None,
+            "summary": None,
+            "reply_text": None,
+            "meal": {
+                "name": "Lunch",
+                "eaten_at": "2026-08-25T12:00:00",
+                "calories_kcal": 600,
+                "protein_g": 35,
+                "carbohydrates_g": 70,
+                "fat_g": 20,
+                "fiber_g": 8,
+            },
+        }
+    )
+    adapter = OpenAIInterpreter(
+        OpenAISettings(api_key="test-key"),
+        client=fake_client,
+    )
+
+    with pytest.raises(AIInterpretationError):
+        adapter.interpret("I ate lunch", "Local datetime: now", "c" * 64)
 
 
 def test_openai_adapter_rejects_malformed_structured_output() -> None:
@@ -191,6 +225,7 @@ def test_openai_adapter_rejects_malformed_structured_output() -> None:
             "session_id": None,
             "summary": None,
             "reply_text": None,
+            "meal": None,
         }
     )
     adapter = OpenAIInterpreter(

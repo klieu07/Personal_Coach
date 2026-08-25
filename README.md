@@ -1,28 +1,44 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 7
-adds a factual nutrition ledger to the training, secure SMS, validated AI, and
-proactive reminder foundations built in Phases 0–6.
+Coachline is a personal, cloud-hosted training and nutrition agent. Phase 8
+connects the factual nutrition ledger to secure messaging and validated AI on
+top of the foundations built in Phases 0–7.
 
-## Current scope: Phase 7
+## Current scope: Phase 8
 
 Coachline can now:
 
-- set effective-dated calorie, protein, carbohydrate, fat, and fiber targets;
-- replace a target for one effective date without duplicating it;
-- select the latest target effective on a requested date;
-- record and replace structured meal entries;
-- require timezone-aware meal timestamps and normalize storage to UTC;
-- group meals by the profile's local calendar day, including across UTC date
-  boundaries;
-- calculate deterministic daily totals and remaining target amounts;
-- isolate every meal and target by profile ownership; and
-- label nutrition provenance as `user_supplied` or `ai_estimate` while ensuring
-  every explicit API entry or replacement becomes `user_supplied`.
+- answer `NUTRITION`, `MACROS`, and `CALORIES` deterministically without AI;
+- interpret free-form nutrition-summary questions as a typed read-only intent;
+- propose meal nutrition through a strict, nested structured-output schema;
+- label every model-proposed meal value as an `ai_estimate`;
+- show the full estimated calories and macros before saving anything;
+- require a separate `YES` message before creating an estimated meal;
+- cancel with `NO` without changing nutrition data;
+- reject naive, more-than-30-day-old, or more-than-one-day-future timestamps;
+- preserve webhook idempotency so confirmation retries do not duplicate meals;
+  and
+- keep explicit API replacements authoritative as `user_supplied`.
 
-Phase 7 does not estimate nutrition with AI. It establishes the factual record
-that later interpretation can propose changes to without silently replacing
-values entered by the user.
+The model can propose a meal estimate but cannot write one. Coachline validates
+the strict object, timestamp range, linked profile, pending confirmation, and
+provenance before ordinary application code creates the record.
+
+## Nutrition messaging workflow
+
+```text
+User: I ate a chicken burrito.
+Coachline: AI estimate for Chicken burrito at 2026-09-01 12:30: 720 kcal,
+           42 g protein, 82 g carbs, 24 g fat, 11 g fiber.
+           Save this estimate? Reply YES or NO.
+User: YES
+Coachline: Saved Chicken burrito as an AI estimate: 720 kcal.
+           Replace it with measured values whenever you have them.
+```
+
+Until confirmation, the meal ledger is unchanged. The `NUTRITION` command and
+existing `TODAY`, `YES`, and `NO` routing continue to work if OpenAI is absent
+or temporarily unavailable.
 
 ## Nutrition ledger and provenance
 
@@ -31,9 +47,9 @@ summaries. Meals store total calories and macros for the entry, an aware
 `eaten_at` timestamp, optional notes, and a provenance label.
 
 The public meal endpoints always write `user_supplied`. The schema reserves
-`ai_estimate` for a future estimation workflow, but an explicit replacement of
-that entry changes the source to `user_supplied`. Daily arithmetic is ordinary
-application code and does not depend on a model.
+`ai_estimate` for confirmed messaging estimates, but an explicit replacement
+of that entry changes the source to `user_supplied`. Daily arithmetic is
+ordinary application code and does not depend on a model.
 
 ```http
 PUT /profiles/1/nutrition-targets/2026-09-01
@@ -105,8 +121,15 @@ message SID returns the stored response and does not execute twice.
   information the user typed.
 - If OpenAI is unconfigured or unavailable, `TODAY`, `YES`, `NO`, and other
   deterministic routing continue to work where applicable.
+- Meal descriptions sent for interpretation may contain information the user
+  typed. Confirmed estimates are stored locally with `ai_estimate` provenance.
 
 No OpenAI request or real SMS is made by the automated test suite.
+
+The AI adapter follows the official OpenAI
+[Responses API](https://developers.openai.com/api/reference/responses)
+contract: strict JSON Schema output, `output_text`, `store=False`, and a hashed
+profile safety identifier.
 
 ## Proactive reminder workflow
 
@@ -208,14 +231,17 @@ cancelled, recovered, delivered, retrying, and permanently failed jobs.
 Deterministic messages:
 
 - `TODAY`, `WORKOUT`, or `TODAY'S WORKOUT`
+- `NUTRITION`, `MACROS`, `CALORIES`, or `TODAY'S NUTRITION`
 - `YES`, `Y`, or `CONFIRM`
 - `NO`, `N`, or `CANCEL`
 
 With OpenAI configured, free-form text can additionally propose:
 
 - showing today's workout;
+- showing today's nutrition summary;
 - skipping one known session;
 - recording a summary result for one known session;
+- proposing one clearly labeled meal estimate for confirmation;
 - a clarification question; or
 - a non-mutating conversational reply.
 
@@ -226,9 +252,9 @@ the user.
 ## API
 
 The earlier health, training, contact, outbound-message, signed Twilio webhook,
-validated AI, and proactive reminder workflows remain available. Phase 7 adds
-effective-dated target, meal, and daily nutrition-summary endpoints. Nutrition
-input is currently API-only and does not expand the model's allowed actions.
+validated AI, and proactive reminder workflows remain available. Phase 8 adds
+typed nutrition read and confirmed estimate intents to messaging. No endpoint
+or model response can bypass the confirmation required to save an estimate.
 
 Interactive API documentation is available at <http://127.0.0.1:8000/docs>
 while the server is running.
@@ -263,6 +289,10 @@ Nutrition tests cover effective target selection, idempotent target replacement,
 timezone-aware daily grouping, totals and balances, profile isolation, input
 validation, provenance labeling, and authoritative user replacement.
 
+Nutrition messaging tests cover deterministic no-AI summaries, typed read-only
+interpretation, strict nested output validation, confirmation, cancellation,
+timestamp rejection, estimate provenance, and duplicate webhook delivery.
+
 ## Run with Docker
 
 ```bash
@@ -274,7 +304,7 @@ For durable Docker data, mount `/app/data` as a volume.
 
 ## Next architectural step
 
-Phase 8 can expose nutrition through messaging. Deterministic daily-summary
-commands should work without AI; free-form meal interpretation may propose a
-clearly labeled estimate, but saving it should require confirmation and must
-never overwrite a `user_supplied` value without an explicit replacement.
+Phase 9 can add production deployment and operations: a PostgreSQL adapter,
+cloud runtime configuration, managed secrets, scheduled reminder invocation,
+database backup and restore procedures, and observable health checks. SQLite
+should remain supported for local development.

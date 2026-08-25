@@ -110,21 +110,22 @@ def create_app(
     interpreter = ai_interpreter
     if interpreter is None and ai_settings.enabled:
         interpreter = OpenAIInterpreter(ai_settings)
+    nutrition = NutritionService(
+        service,
+        SQLiteNutritionRepository(database),
+    )
     messaging = MessagingService(
         service,
         SQLiteMessagingRepository(database),
         sender=adapter,
         interpreter=interpreter,
         ai_repository=SQLiteAIRepository(database),
+        nutrition=nutrition,
     )
     reminders = ReminderService(
         service,
         messaging,
         SQLiteReminderRepository(database),
-    )
-    nutrition = NutritionService(
-        service,
-        SQLiteNutritionRepository(database),
     )
     clock = now_provider or (lambda: datetime.now(timezone.utc))
 
@@ -133,7 +134,7 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.7.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.8.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service

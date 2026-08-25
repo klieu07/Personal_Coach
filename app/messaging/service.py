@@ -21,6 +21,8 @@ from app.messaging.repository import (
     MessagingConflictError,
     MessagingRepository,
 )
+from app.nutrition.models import DailyNutritionSummary, MealEntryCreate
+from app.nutrition.service import NutritionService
 from app.repository import ConflictError, NotFoundError
 from app.schemas import (
     LiftingPrescription,
@@ -41,12 +43,14 @@ class MessagingService:
         sender: MessageSender | None = None,
         interpreter: AIInterpreter | None = None,
         ai_repository: AIRepository | None = None,
+        nutrition: NutritionService | None = None,
     ) -> None:
         self.coachline = coachline
         self.repository = repository
         self.sender = sender
         self.interpreter = interpreter
         self.ai_repository = ai_repository
+        self.nutrition = nutrition
 
     def add_contact(
         self, profile_id: int, payload: MessagingContactCreate
@@ -109,6 +113,18 @@ class MessagingService:
         if command in {"today", "workout", "today's workout", "todays workout"}:
             plans = self.coachline.todays_workouts(profile_id)
             return self._format_today(plans)
+        if command in {
+            "nutrition",
+            "macros",
+            "calories",
+            "today's nutrition",
+            "todays nutrition",
+        }:
+            if self.nutrition is None:
+                return "Nutrition tracking is not configured."
+            return self._format_nutrition(
+                self.nutrition.daily_summary(profile_id)
+            )
 
         pending = (
             self.ai_repository.get_pending(contact.id)
@@ -123,6 +139,8 @@ class MessagingService:
             if pending is None:
                 return "There is no pending Coachline action to cancel."
             self.ai_repository.clear_pending(contact.id)
+            if pending.interpretation.intent is AIIntent.LOG_MEAL_ESTIMATE:
+                return "Canceled. No nutrition data was changed."
             return "Canceled. No training data was changed."
         if pending is not None:
             return pending.confirmation_prompt + " Reply YES or NO."
@@ -130,7 +148,8 @@ class MessagingService:
         if self.interpreter is None or self.ai_repository is None:
             return (
                 "Coachline received your message. Reply TODAY to see your planned "
-                "workouts. AI interpretation is not configured."
+                "workouts or NUTRITION for today's totals. AI interpretation "
+                "is not configured."
             )
 
         safety_identifier = hashlib.sha256(
@@ -164,8 +183,16 @@ class MessagingService:
             return self._format_today(
                 self.coachline.todays_workouts(contact.profile_id)
             )
+        if interpretation.intent is AIIntent.SHOW_NUTRITION:
+            if self.nutrition is None:
+                return "Nutrition tracking is not configured."
+            return self._format_nutrition(
+                self.nutrition.daily_summary(contact.profile_id)
+            )
         if interpretation.intent in {AIIntent.CLARIFY, AIIntent.REPLY}:
             return str(interpretation.reply_text)
+        if interpretation.intent is AIIntent.LOG_MEAL_ESTIMATE:
+            return self._propose_meal_estimate(contact, interpretation)
 
         session_id = int(interpretation.session_id)
         try:
@@ -209,6 +236,8 @@ class MessagingService:
         self, profile_id: int, pending: PendingAction
     ) -> str:
         action = pending.interpretation
+        if action.intent is AIIntent.LOG_MEAL_ESTIMATE:
+            return self._execute_pending_meal(profile_id, pending)
         session_id = int(action.session_id)
         try:
             session = self.coachline.get_session_for_profile(
@@ -230,17 +259,113 @@ class MessagingService:
         self.ai_repository.clear_pending(pending.contact_id)
         return reply
 
+    def _propose_meal_estimate(
+        self,
+        contact: MessagingContact,
+        interpretation: AIInterpretation,
+    ) -> str:
+        if self.nutrition is None:
+            return "Nutrition tracking is not configured."
+        meal = interpretation.meal
+        if meal is None:
+            return "I need more meal details before I can estimate nutrition."
+        now = datetime.now(timezone.utc)
+        if not self._meal_time_is_allowed(meal.eaten_at, now):
+            return (
+                "I couldn't safely place that meal in time. Include when you "
+                "ate it and try again."
+            )
+        local_zone = ZoneInfo(
+            self.coachline.get_profile(contact.profile_id).timezone
+        )
+        local_time = meal.eaten_at.astimezone(local_zone)
+        prompt = (
+            f"AI estimate for {meal.name} at "
+            f"{local_time:%Y-%m-%d %H:%M}: {meal.calories_kcal:g} kcal, "
+            f"{meal.protein_g:g} g protein, "
+            f"{meal.carbohydrates_g:g} g carbs, {meal.fat_g:g} g fat, "
+            f"{meal.fiber_g:g} g fiber. Save this estimate?"
+        )
+        self.ai_repository.replace_pending(
+            PendingAction(
+                contact_id=contact.id,
+                interpretation=interpretation,
+                confirmation_prompt=prompt,
+                expires_at=now + timedelta(minutes=15),
+            )
+        )
+        return prompt + " Reply YES or NO."
+
+    def _execute_pending_meal(
+        self, profile_id: int, pending: PendingAction
+    ) -> str:
+        action = pending.interpretation
+        meal = action.meal
+        if self.nutrition is None or meal is None:
+            reply = "That meal estimate could not be saved safely."
+        elif not self._meal_time_is_allowed(
+            meal.eaten_at, datetime.now(timezone.utc)
+        ):
+            reply = "That meal estimate is no longer within the allowed date range."
+        else:
+            try:
+                saved = self.nutrition.create_estimated_meal(
+                    profile_id,
+                    MealEntryCreate(**meal.model_dump()),
+                )
+                reply = (
+                    f"Saved {saved.name} as an AI estimate: "
+                    f"{saved.calories_kcal:g} kcal. Replace it with measured "
+                    "values whenever you have them."
+                )
+            except NotFoundError as exc:
+                reply = f"That meal estimate could not be saved: {exc}"
+        self.ai_repository.clear_pending(pending.contact_id)
+        return reply
+
     def _build_context(self, profile_id: int) -> str:
         profile = self.coachline.get_profile(profile_id)
-        local_date = datetime.now(ZoneInfo(profile.timezone)).date()
+        local_now = datetime.now(ZoneInfo(profile.timezone))
         sessions = self.coachline.list_sessions(profile_id)[-20:]
-        lines = [f"Local date: {local_date}", "Known sessions:"]
+        lines = [f"Local datetime: {local_now.isoformat()}", "Known sessions:"]
         for session in sessions:
             lines.append(
                 f"- id={session.id}; date={session.scheduled_for}; "
                 f"status={session.status.value}; title={session.title}"
             )
         return "\n".join(lines)
+
+    @staticmethod
+    def _meal_time_is_allowed(value: datetime, now: datetime) -> bool:
+        return now - timedelta(days=30) <= value <= now + timedelta(days=1)
+
+    @staticmethod
+    def _format_nutrition(summary: DailyNutritionSummary) -> str:
+        totals = summary.totals
+        meal_count = len(summary.meals)
+        prefix = (
+            f"Nutrition for {summary.on} ({meal_count} "
+            f"{'meal' if meal_count == 1 else 'meals'}): "
+        )
+        if summary.target is None:
+            return (
+                prefix
+                + f"{totals.calories_kcal:g} kcal, "
+                f"{totals.protein_g:g} g protein, "
+                f"{totals.carbohydrates_g:g} g carbs, "
+                f"{totals.fat_g:g} g fat, {totals.fiber_g:g} g fiber. "
+                "No nutrition target is set."
+            )[:1600]
+        target = summary.target
+        return (
+            prefix
+            + f"{totals.calories_kcal:g}/{target.calories_kcal:g} kcal; "
+            f"protein {totals.protein_g:g}/{target.protein_g:g} g; "
+            f"carbs {totals.carbohydrates_g:g}/"
+            f"{target.carbohydrates_g:g} g; fat {totals.fat_g:g}/"
+            f"{target.fat_g:g} g; fiber {totals.fiber_g:g}/"
+            f"{target.fiber_g:g} g."
+        )[:1600]
 
     @classmethod
     def _format_today(cls, plans: list[SessionPlan]) -> str:
