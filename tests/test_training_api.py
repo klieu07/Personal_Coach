@@ -76,6 +76,8 @@ def test_training_workflow_persists_and_completes_session(tmp_path: Path) -> Non
             "session_id": session_id,
             "summary": "Finished in 31:20 and felt comfortable",
             "completed_at": "2026-08-26T10:30:00Z",
+            "lifting_sets": [],
+            "running_metrics": None,
         }
         assert client.get(f"/sessions/{session_id}").json()["status"] == "completed"
 

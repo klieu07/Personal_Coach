@@ -1,6 +1,7 @@
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -10,11 +11,14 @@ from pydantic import BaseModel
 from app.database import Database
 from app.repository import ConflictError, NotFoundError, SQLiteCoachlineRepository
 from app.schemas import (
+    Prescription,
     Profile,
     ProfileCreate,
     Program,
     ProgramCreate,
+    ProgressionCreate,
     SessionCreate,
+    SessionPlan,
     SessionStatus,
     SessionStatusUpdate,
     TrainingSession,
@@ -44,7 +48,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.2.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.3.0", lifespan=lifespan)
 
     def get_service() -> CoachlineService:
         return service
@@ -142,6 +146,67 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     ) -> WorkoutResult:
         try:
             return coachline.record_result(session_id, payload)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get(
+        "/sessions/{session_id}/result", response_model=WorkoutResult
+    )
+    def get_result(session_id: int, coachline: Service) -> WorkoutResult:
+        try:
+            return coachline.get_result(session_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.put(
+        "/sessions/{session_id}/prescription", response_model=Prescription
+    )
+    def save_prescription(
+        session_id: int, payload: Prescription, coachline: Service
+    ) -> Prescription:
+        try:
+            return coachline.save_prescription(session_id, payload)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get(
+        "/sessions/{session_id}/prescription", response_model=Prescription
+    )
+    def get_prescription(
+        session_id: int, coachline: Service
+    ) -> Prescription:
+        try:
+            return coachline.get_prescription(session_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/profiles/{profile_id}/today", response_model=list[SessionPlan]
+    )
+    def todays_workouts(
+        profile_id: int,
+        coachline: Service,
+        on_date: Annotated[date | None, Query(alias="on")] = None,
+    ) -> list[SessionPlan]:
+        try:
+            return coachline.todays_workouts(profile_id, on_date)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.post(
+        "/sessions/{session_id}/progression",
+        response_model=SessionPlan,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def progress_session(
+        session_id: int, payload: ProgressionCreate, coachline: Service
+    ) -> SessionPlan:
+        try:
+            return coachline.progress_session(session_id, payload)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ConflictError as exc:

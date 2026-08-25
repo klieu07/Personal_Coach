@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "coachline"
-version = "0.2.0"
+version = "0.3.0"
 description = "A personal training and nutrition agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1.0",
     "pydantic>=2.9,<3.0",
+    "tzdata>=2025.2",
     "uvicorn>=0.30,<1.0",
 ]
 
