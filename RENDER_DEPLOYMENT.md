@@ -46,6 +46,16 @@ result reports `status: ready` and `database_backend: postgresql`. The smoke
 test performs only `GET` requests to health routes and does not read or change
 profile, training, nutrition, or messaging data.
 
+The owner-only SMS pilot publishes its carrier-review documents from the same
+web service, with no separate static-site resource:
+
+- `/privacy`: Coachline privacy policy and mobile-data disclosures.
+- `/terms`: SMS program terms and required STOP, HELP, rates, and carrier terms.
+- `/sms-consent`: the verifiable owner-only development consent process.
+
+These routes contain the public support address but no phone number, API key,
+authentication token, or private database detail.
+
 ## Connect Twilio after the URL exists
 
 1. Obtain and verify an SMS-capable Twilio number. Until then, Coachline can be

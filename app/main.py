@@ -53,6 +53,7 @@ from app.nutrition.models import (
 from app.nutrition.repository import SQLNutritionRepository
 from app.nutrition.service import NutritionService
 from app.observability import install_request_observability
+from app.public_pages import router as public_pages_router
 from app.repository import ConflictError, NotFoundError, SQLCoachlineRepository
 from app.reminders.models import (
     ReminderRunResult,
@@ -142,9 +143,10 @@ def create_app(
         database.migrate()
         yield
 
-    application = FastAPI(title="Coachline", version="0.10.0", lifespan=lifespan)
+    application = FastAPI(title="Coachline", version="0.10.1", lifespan=lifespan)
     application.state.database = database
     install_request_observability(application)
+    application.include_router(public_pages_router)
 
     def get_service() -> CoachlineService:
         return service
