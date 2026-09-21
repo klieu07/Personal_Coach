@@ -1,10 +1,6 @@
 # Coachline
 
-Coachline is a personal, cloud-hosted training and nutrition agent. Phase 11
-locks its existing Render pilot to one owner credential and defines a
-test-data-only Twilio Virtual Phone workflow while A2P review is pending. The
-Blueprint remains one free web service and one free PostgreSQL database; its
-reminder scheduler remains disabled. SQLite is the zero-service local default.
+Coachline is a personal, cloud-hosted training and nutrition agent. The main purpose of this project was for me to have something or someone to remind to work on messages and comfortably text asking for heads-up throughout my day tracking my intake and my output without having to utilize other apps as messages was an already heavily used app in my folder I shifted to that naturally however it does require you to pay for a phone number or you can use a secondary older Mac as a permanent host if you have that availability. This can also be done on telegram if shifted around a bit to fit that mold.
 
 ## Current scope: Phase 11
 
